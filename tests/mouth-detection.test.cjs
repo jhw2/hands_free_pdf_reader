@@ -20,9 +20,10 @@ function detector() {
   const moves = [];
   const state = { current: { phase: 'idle', startedAt: null, closedAt: null, stableFrames: 0 } };
   const smoothed = { current: null };
-  const onResults = new Function('mouthStateRef', 'smoothedMouthRef', 'performance', 'handleGesture', 'updateGestureText', 'computeMouthOpenRatio', 'getSmoothedMouthRatio', 'cancelled', `${compiled}\nreturn onResults;`)(state, smoothed, { now: () => now }, direction => moves.push(direction), () => {}, ratio => ratio, (_ref, ratio) => ratio, false);
+  const mouthHoldDurationRef = { current: 500 };
+  const onResults = new Function('mouthStateRef', 'mouthHoldDurationRef', 'smoothedMouthRef', 'performance', 'handleGesture', 'updateGestureText', 'computeMouthOpenRatio', 'getSmoothedMouthRatio', 'cancelled', `${compiled}\nreturn onResults;`)(state, mouthHoldDurationRef, smoothed, { now: () => now }, direction => moves.push(direction), () => {}, ratio => ratio, (_ref, ratio) => ratio, false);
   return {
-    moves, state,
+    moves, state, mouthHoldDurationRef,
     sample(time, ratio) { now = time; onResults({ multiFaceLandmarks: ratio === null ? [] : [ratio] }); },
   };
 }
@@ -38,10 +39,26 @@ test('holding open for 0.5 seconds advances once until mouth closes', () => {
   assert.equal(d.state.current.phase, 'idle');
 });
 
+test('the configured hold duration controls when the next page advances', () => {
+  const d = detector();
+  d.mouthHoldDurationRef.current = 300;
+  d.sample(0, 0.5); d.sample(50, 0.5); d.sample(349, 0.5);
+  assert.deepEqual(d.moves, []);
+  d.sample(350, 0.5);
+  assert.deepEqual(d.moves, ['right']);
+});
+
 test('two short openings go back once without advancing', () => {
   const d = detector();
   d.sample(0, 0.5); d.sample(50, 0.5); d.sample(200, 0.1);
   d.sample(350, 0.5); d.sample(400, 0.5); d.sample(1000, 0.5);
+  assert.deepEqual(d.moves, ['left']);
+});
+
+test('two quick openings go back without requiring a long first opening', () => {
+  const d = detector();
+  d.sample(0, 0.5); d.sample(30, 0.5); d.sample(100, 0.1);
+  d.sample(130, 0.5); d.sample(160, 0.5);
   assert.deepEqual(d.moves, ['left']);
 });
 

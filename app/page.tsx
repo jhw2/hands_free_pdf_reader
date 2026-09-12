@@ -9,14 +9,18 @@ const READER_STORE_NAME = "reader-state";
 const SESSION_STATE_KEY = "session-state";
 const SAVED_SCORES_KEY = "saved-scores";
 const MOTION_DETECTION_ENABLED_KEY = "motion-detection-enabled";
+const MOUTH_HOLD_DURATION_STORAGE_KEY = "mouth-hold-duration-ms";
 const PAGE_TURN_COOLDOWN_MS = 1200;
+const GESTURE_FEEDBACK_DURATION_MS = 1000;
+const TOUCH_SWIPE_MIN_DISTANCE_PX = 50;
 const MOUTH_RATIO_SMOOTHING_ALPHA = 0.55;
 const MOUTH_OPEN_RATIO_THRESHOLD = 0.36;
 const MOUTH_CLOSE_RATIO_THRESHOLD = 0.18;
 const MOUTH_HOLD_DURATION_MS = 500;
-const MOUTH_MIN_OPEN_MS = 120;
+const MOUTH_MIN_OPEN_MS = 60;
 const MOUTH_DOUBLE_TAP_WINDOW_MS = 600;
 const MOUTH_STABLE_FRAME_TARGET = 2;
+const MOUTH_HOLD_DURATION_OPTIONS_MS = [300, 400, 500, 700, 1000];
 
 type SavedScore = {
   id: string;
@@ -117,6 +121,7 @@ export default function Home() {
   const [isFocusMode, setIsFocusMode] = useState(false);
   const [isFocusControlsVisible, setIsFocusControlsVisible] = useState(false);
   const [cameraEnabled, setCameraEnabled] = useState(false);
+  const [mouthHoldDurationMs, setMouthHoldDurationMs] = useState(MOUTH_HOLD_DURATION_MS);
   const [cameraPermission, setCameraPermission] = useState<"unknown" | "prompt" | "granted" | "denied">(
     "unknown"
   );
@@ -139,7 +144,10 @@ export default function Home() {
     closedAt: null,
     stableFrames: 0,
   });
+  const mouthHoldDurationRef = useRef(MOUTH_HOLD_DURATION_MS);
   const focusControlsTimeoutRef = useRef<number | null>(null);
+  const gestureFeedbackTimeoutRef = useRef<number | null>(null);
+  const touchStartRef = useRef<{ pointerId: number; x: number; y: number } | null>(null);
 
   const loadPdfJs = async () => {
     if (window.pdfjsLib) {
@@ -159,6 +167,21 @@ export default function Home() {
 
     gestureTextRef.current = nextText;
     setGestureText(nextText);
+  };
+
+  const showTemporaryGestureText = (nextText: string) => {
+    updateGestureText(nextText);
+
+    if (gestureFeedbackTimeoutRef.current !== null) {
+      window.clearTimeout(gestureFeedbackTimeoutRef.current);
+    }
+
+    gestureFeedbackTimeoutRef.current = window.setTimeout(() => {
+      if (gestureTextRef.current === nextText) {
+        updateGestureText("입모양 감지 준비됨");
+      }
+      gestureFeedbackTimeoutRef.current = null;
+    }, GESTURE_FEEDBACK_DURATION_MS);
   };
 
   const saveSessionState = async (overrides?: Partial<SessionState>) => {
@@ -259,6 +282,12 @@ export default function Home() {
 
     const restoreReaderState = async () => {
       try {
+        const storedMouthHoldDuration = Number(window.localStorage.getItem(MOUTH_HOLD_DURATION_STORAGE_KEY));
+        if (MOUTH_HOLD_DURATION_OPTIONS_MS.includes(storedMouthHoldDuration)) {
+          mouthHoldDurationRef.current = storedMouthHoldDuration;
+          setMouthHoldDurationMs(storedMouthHoldDuration);
+        }
+
         const [
           storedScores,
           sessionState,
@@ -306,7 +335,12 @@ export default function Home() {
     };
 
     window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      if (gestureFeedbackTimeoutRef.current !== null) {
+        window.clearTimeout(gestureFeedbackTimeoutRef.current);
+      }
+    };
   }, []);
 
   useEffect(() => {
@@ -421,7 +455,7 @@ export default function Home() {
                 } else {
                   mouthStateRef.current = idleState;
                 }
-              } else if (ms.startedAt !== null && mouthNow - ms.startedAt >= MOUTH_HOLD_DURATION_MS) {
+              } else if (ms.startedAt !== null && mouthNow - ms.startedAt >= mouthHoldDurationRef.current) {
                 handleGesture("right");
                 mouthStateRef.current = { phase: "waiting-close", startedAt: null, closedAt: null, stableFrames: 0 };
               }
@@ -558,6 +592,48 @@ export default function Home() {
     }
   };
 
+  const handlePageSwipeStart = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.pointerType === "mouse" && event.button !== 0) {
+      return;
+    }
+
+    touchStartRef.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const handlePageSwipeEnd = (event: React.PointerEvent<HTMLDivElement>) => {
+    const start = touchStartRef.current;
+    touchStartRef.current = null;
+
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+
+    if (!start || event.pointerId !== start.pointerId) {
+      return;
+    }
+
+    const deltaX = event.clientX - start.x;
+    const deltaY = event.clientY - start.y;
+    if (Math.abs(deltaX) < TOUCH_SWIPE_MIN_DISTANCE_PX || Math.abs(deltaX) <= Math.abs(deltaY)) {
+      return;
+    }
+
+    if (pageCountRef.current === 0) {
+      return;
+    }
+
+    const targetPage = currentPageRef.current + (deltaX < 0 ? 1 : -1);
+    const safeTargetPage = Math.max(1, Math.min(pageCountRef.current, targetPage));
+    if (safeTargetPage === currentPageRef.current) {
+      showTemporaryGestureText(deltaX < 0 ? "마지막 페이지" : "첫 페이지");
+      return;
+    }
+
+    queuePage(safeTargetPage);
+    showTemporaryGestureText(deltaX < 0 ? "다음 페이지" : "이전 페이지");
+  };
+
   const persistCurrentPdf = async () => {
     if (!currentPdfBlobRef.current) {
       return false;
@@ -658,21 +734,21 @@ export default function Home() {
 
     if (direction === "right") {
       if (currentPage >= totalPages) {
-        updateGestureText("마지막 페이지");
+        showTemporaryGestureText("마지막 페이지");
         return false;
       } else {
         queuePage(currentPage + 1);
-        updateGestureText("다음 페이지");
+        showTemporaryGestureText("다음 페이지");
         lastSwitchTimeRef.current = now;
         return true;
       }
     } else {
       if (currentPage <= 1) {
-        updateGestureText("첫 페이지");
+        showTemporaryGestureText("첫 페이지");
         return false;
       } else {
         queuePage(currentPage - 1);
-        updateGestureText("이전 페이지");
+        showTemporaryGestureText("이전 페이지");
         lastSwitchTimeRef.current = now;
         return true;
       }
@@ -740,6 +816,27 @@ export default function Home() {
       </button>
       {isMotionGuideExpanded ? (
         <div className="motion-guide-content">
+          <label className="mouth-duration-setting">
+            <span>다음 페이지 넘김 시간</span>
+            <span className="mouth-duration-control">
+              <select
+                value={mouthHoldDurationMs}
+                onChange={(event) => {
+                  const nextDuration = Number(event.target.value);
+                  mouthHoldDurationRef.current = nextDuration;
+                  setMouthHoldDurationMs(nextDuration);
+                  window.localStorage.setItem(MOUTH_HOLD_DURATION_STORAGE_KEY, String(nextDuration));
+                }}
+              >
+                {MOUTH_HOLD_DURATION_OPTIONS_MS.map((duration) => (
+                  <option key={duration} value={duration}>
+                    {(duration / 1000).toFixed(1)}초
+                  </option>
+                ))}
+              </select>
+            </span>
+            <small>{(mouthHoldDurationMs / 1000).toFixed(1)}초 동안 입을 벌리면 다음 페이지로 넘어갑니다.</small>
+          </label>
           <ol className="motion-guide-list">
             <li>
               <span className="motion-guide-step">1.</span>
@@ -751,7 +848,7 @@ export default function Home() {
             <li>
               <span className="motion-guide-step">2.</span>
               <div>
-                <strong>입을 0.5초 벌려 유지</strong>
+                <strong>입을 {(mouthHoldDurationMs / 1000).toFixed(1)}초 벌려 유지</strong>
                 <span>다음 페이지로 이동합니다. 이동 후 입을 닫아 주세요.</span>
               </div>
             </li>
@@ -759,7 +856,8 @@ export default function Home() {
               <span className="motion-guide-step">3.</span>
               <div>
                 <strong>입을 짧게 두 번 벌리기</strong>
-                <span className="motion-guide-result">이전 페이지 · 한 번 닫고 바로 다시 벌려 주세요.</span>
+                <span className="motion-guide-result">이전 페이지 · 짧게 벌렸다 닫고 0.6초 안에 다시 벌려 주세요.</span>
+                <span>두 번째 벌림이 감지되는 즉시 넘어가며, 0.6초를 기다릴 필요는 없습니다.</span>
               </div>
             </li>
             <li>
@@ -767,6 +865,13 @@ export default function Home() {
               <div>
                 <strong>이동 후 입 닫기</strong>
                 <span>입을 닫으면 다음 동작을 받을 수 있습니다.</span>
+              </div>
+            </li>
+            <li>
+              <span className="motion-guide-step">5.</span>
+              <div>
+                <strong>터치·마우스로 페이지 넘기기</strong>
+                <span>PDF 화면을 왼쪽으로 밀면 다음 페이지, 오른쪽으로 밀면 이전 페이지로 이동합니다.</span>
               </div>
             </li>
           </ol>
@@ -833,7 +938,14 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="pdf-viewer">
+          <div
+            className="pdf-viewer"
+            onPointerDown={handlePageSwipeStart}
+            onPointerUp={handlePageSwipeEnd}
+            onPointerCancel={() => {
+              touchStartRef.current = null;
+            }}
+          >
             <button
               type="button"
               className="focus-controls-hit-area"
