@@ -8,19 +8,18 @@ const READER_DB_NAME = "motion-pdf-reader";
 const READER_STORE_NAME = "reader-state";
 const SESSION_STATE_KEY = "session-state";
 const SAVED_SCORES_KEY = "saved-scores";
-const MOTION_DETECTION_ENABLED_KEY = "motion-detection-enabled";
 const MOUTH_HOLD_DURATION_STORAGE_KEY = "mouth-hold-duration-ms";
-const PAGE_TURN_COOLDOWN_MS = 1200;
 const GESTURE_FEEDBACK_DURATION_MS = 1000;
 const TOUCH_SWIPE_MIN_DISTANCE_PX = 50;
+const MOUTH_HOLD_DURATION_OPTIONS_MS = [300, 400, 500, 700, 1000];
+const PAGE_TURN_COOLDOWN_MS = 1200;
 const MOUTH_RATIO_SMOOTHING_ALPHA = 0.55;
 const MOUTH_OPEN_RATIO_THRESHOLD = 0.36;
 const MOUTH_CLOSE_RATIO_THRESHOLD = 0.18;
 const MOUTH_HOLD_DURATION_MS = 500;
-const MOUTH_MIN_OPEN_MS = 60;
+const MOUTH_MIN_OPEN_MS = 40;
 const MOUTH_DOUBLE_TAP_WINDOW_MS = 600;
 const MOUTH_STABLE_FRAME_TARGET = 2;
-const MOUTH_HOLD_DURATION_OPTIONS_MS = [300, 400, 500, 700, 1000];
 
 type SavedScore = {
   id: string;
@@ -110,18 +109,22 @@ export default function Home() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [pageText, setPageText] = useState("페이지: 0 / 0");
-  const [gestureText, setGestureText] = useState("PDF를 먼저 불러오면 다음 단계가 쉬워집니다.");
+  const [gestureText, setGestureText] = useState("카메라를 준비하고 있어요");
   const [pdfDoc, setPdfDoc] = useState<any>(null);
   const [pageCount, setPageCount] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
   const [currentFileName, setCurrentFileName] = useState<string | null>(null);
   const [savedScores, setSavedScores] = useState<SavedScore[]>([]);
   const [isLibraryOpen, setIsLibraryOpen] = useState(false);
-  const [isMotionGuideExpanded, setIsMotionGuideExpanded] = useState(true);
+  const [isMotionGuideExpanded, setIsMotionGuideExpanded] = useState(false);
   const [isFocusMode, setIsFocusMode] = useState(false);
   const [isFocusControlsVisible, setIsFocusControlsVisible] = useState(false);
-  const [cameraEnabled, setCameraEnabled] = useState(false);
+  const [cameraEnabled, setCameraEnabled] = useState(true);
   const [mouthHoldDurationMs, setMouthHoldDurationMs] = useState(MOUTH_HOLD_DURATION_MS);
+  const [detectionStatus, setDetectionStatus] = useState("카메라를 준비하고 있어요");
+  const [mouthProgress, setMouthProgress] = useState(0);
+  const [isGestureActive, setIsGestureActive] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
   const [cameraPermission, setCameraPermission] = useState<"unknown" | "prompt" | "granted" | "denied">(
     "unknown"
   );
@@ -136,7 +139,7 @@ export default function Home() {
   const currentFileNameRef = useRef<string | null>(null);
   const currentPdfBlobRef = useRef<Blob | null>(null);
   const currentSavedScoreIdRef = useRef<string | null>(null);
-  const gestureTextRef = useRef("PDF를 먼저 불러오면 다음 단계가 쉬워집니다.");
+  const gestureTextRef = useRef("카메라를 준비하고 있어요");
   const smoothedMouthRef = useRef<number | null>(null);
   const mouthStateRef = useRef<MouthDetectionState>({
     phase: "idle",
@@ -145,9 +148,9 @@ export default function Home() {
     stableFrames: 0,
   });
   const mouthHoldDurationRef = useRef(MOUTH_HOLD_DURATION_MS);
-  const focusControlsTimeoutRef = useRef<number | null>(null);
   const gestureFeedbackTimeoutRef = useRef<number | null>(null);
   const touchStartRef = useRef<{ pointerId: number; x: number; y: number } | null>(null);
+  const focusControlsTimeoutRef = useRef<number | null>(null);
 
   const loadPdfJs = async () => {
     if (window.pdfjsLib) {
@@ -287,15 +290,12 @@ export default function Home() {
           mouthHoldDurationRef.current = storedMouthHoldDuration;
           setMouthHoldDurationMs(storedMouthHoldDuration);
         }
-
         const [
           storedScores,
           sessionState,
-          storedMotionDetectionEnabled,
         ] = await Promise.all([
           readReaderValue<SavedScore[]>(SAVED_SCORES_KEY),
           readReaderValue<SessionState>(SESSION_STATE_KEY),
-          readReaderValue<boolean>(MOTION_DETECTION_ENABLED_KEY),
         ]);
 
         if (cancelled) {
@@ -303,7 +303,6 @@ export default function Home() {
         }
 
         setSavedScores(storedScores ?? []);
-        setCameraEnabled(storedMotionDetectionEnabled ?? false);
 
         if (!sessionState?.pdfBlob) {
           return;
@@ -337,9 +336,7 @@ export default function Home() {
     window.addEventListener("keydown", onKeyDown);
     return () => {
       window.removeEventListener("keydown", onKeyDown);
-      if (gestureFeedbackTimeoutRef.current !== null) {
-        window.clearTimeout(gestureFeedbackTimeoutRef.current);
-      }
+      if (gestureFeedbackTimeoutRef.current !== null) window.clearTimeout(gestureFeedbackTimeoutRef.current);
     };
   }, []);
 
@@ -359,19 +356,19 @@ export default function Home() {
   useEffect(() => {
     let cancelled = false;
 
+    let ownedCamera: MediaPipeCamera | null = null;
+    let ownedFaceMesh: MediaPipeFaceMesh | null = null;
     const stopCamera = async () => {
-      if (cameraInstanceRef.current) {
-        await cameraInstanceRef.current.stop();
-        cameraInstanceRef.current = null;
+      const camera = ownedCamera;
+      if (camera) {
+        await camera.stop();
+        if (cameraInstanceRef.current === camera) cameraInstanceRef.current = null;
       }
-
-      if (videoRef.current?.srcObject) {
-        const stream = videoRef.current.srcObject as MediaStream;
-        stream.getTracks().forEach((track) => track.stop());
-        videoRef.current.srcObject = null;
+      if (ownedFaceMesh) {
+        await ownedFaceMesh.close();
+        if (faceMeshRef.current === ownedFaceMesh) faceMeshRef.current = null;
+        ownedFaceMesh = null;
       }
-
-      faceMeshRef.current = null;
       smoothedMouthRef.current = null;
       mouthStateRef.current = { phase: "idle", startedAt: null, closedAt: null, stableFrames: 0 };
     };
@@ -379,11 +376,9 @@ export default function Home() {
     const initFaceMesh = async () => {
       if (!cameraEnabled) {
         await stopCamera();
-        if (cameraPermission === "granted") {
-          updateGestureText("모션 감지 대기 중");
-        } else {
-          updateGestureText("모션 감지 꺼짐");
-        }
+        setDetectionStatus("입으로 넘기기를 잠시 멈췄어요");
+        setMouthProgress(0);
+        setIsGestureActive(false);
         return;
       }
 
@@ -391,6 +386,8 @@ export default function Home() {
         return;
       }
 
+      setDetectionStatus("카메라를 준비하고 있어요");
+      setIsGestureActive(false);
       try {
         const [{ FaceMesh }, { Camera }] = await Promise.all([
           import("@mediapipe/face_mesh"),
@@ -404,6 +401,7 @@ export default function Home() {
         const faceMesh = new FaceMesh({
           locateFile: (file: string) => `/mediapipe/face_mesh/${file}`,
         });
+        ownedFaceMesh = faceMesh;
         faceMeshRef.current = faceMesh;
 
         faceMesh.setOptions({
@@ -418,7 +416,7 @@ export default function Home() {
           if (!results.multiFaceLandmarks?.length) {
             smoothedMouthRef.current = null;
             mouthStateRef.current = { phase: "idle", startedAt: null, closedAt: null, stableFrames: 0 };
-            updateGestureText("얼굴이 카메라에 보이게 해 주세요");
+            updateDetectionFeedback(null);
             return;
           }
           const landmarks = results.multiFaceLandmarks[0];
@@ -426,29 +424,27 @@ export default function Home() {
           {
             const rawMouth = computeMouthOpenRatio(landmarks);
             const mouthRatio = getSmoothedMouthRatio(smoothedMouthRef, rawMouth);
+            // Smoothing must not hide the brief close between two openings.
+            const mouthClosed = rawMouth < MOUTH_CLOSE_RATIO_THRESHOLD;
+            if (mouthClosed) smoothedMouthRef.current = rawMouth;
             const mouthNow = performance.now();
             const ms = mouthStateRef.current;
             const idleState: MouthDetectionState = { phase: "idle", startedAt: null, closedAt: null, stableFrames: 0 };
             if (ms.phase === "waiting-close") {
-              if (mouthRatio < MOUTH_CLOSE_RATIO_THRESHOLD) {
+              if (mouthClosed) {
                 mouthStateRef.current = idleState;
               }
             } else if (ms.phase === "first-closed") {
               if (ms.closedAt !== null && mouthNow - ms.closedAt > MOUTH_DOUBLE_TAP_WINDOW_MS) {
-                mouthStateRef.current = { ...idleState, stableFrames: mouthRatio > MOUTH_OPEN_RATIO_THRESHOLD ? 1 : 0 };
-              } else if (mouthRatio > MOUTH_OPEN_RATIO_THRESHOLD) {
-                const nextFrames = ms.stableFrames + 1;
-                if (nextFrames >= MOUTH_STABLE_FRAME_TARGET) {
-                  handleGesture("left");
-                  mouthStateRef.current = { phase: "waiting-close", startedAt: null, closedAt: null, stableFrames: 0 };
-                } else {
-                  mouthStateRef.current = { ...ms, stableFrames: nextFrames };
-                }
-              } else {
-                if (ms.stableFrames > 0) mouthStateRef.current = { ...ms, stableFrames: 0 };
+                mouthStateRef.current = { ...idleState, startedAt: rawMouth > MOUTH_OPEN_RATIO_THRESHOLD ? mouthNow : null, stableFrames: rawMouth > MOUTH_OPEN_RATIO_THRESHOLD ? 1 : 0 };
+              } else if (rawMouth > MOUTH_OPEN_RATIO_THRESHOLD) {
+                // The first open/close already confirms the gesture; do not
+                // require the short second opening to survive smoothing or two frames.
+                handleGesture("left");
+                mouthStateRef.current = { phase: "waiting-close", startedAt: null, closedAt: null, stableFrames: 0 };
               }
             } else if (ms.phase === "open") {
-              if (mouthRatio < MOUTH_CLOSE_RATIO_THRESHOLD) {
+              if (mouthClosed) {
                 const openDuration = ms.startedAt !== null ? mouthNow - ms.startedAt : 0;
                 if (openDuration >= MOUTH_MIN_OPEN_MS) {
                   mouthStateRef.current = { phase: "first-closed", startedAt: ms.startedAt, closedAt: mouthNow, stableFrames: 0 };
@@ -460,16 +456,21 @@ export default function Home() {
                 mouthStateRef.current = { phase: "waiting-close", startedAt: null, closedAt: null, stableFrames: 0 };
               }
             } else {
-              if (mouthRatio > MOUTH_OPEN_RATIO_THRESHOLD) {
+              if (rawMouth > MOUTH_OPEN_RATIO_THRESHOLD) {
                 const nextFrames = ms.stableFrames + 1;
-                mouthStateRef.current = nextFrames >= MOUTH_STABLE_FRAME_TARGET
+                mouthStateRef.current = nextFrames >= MOUTH_STABLE_FRAME_TARGET && mouthRatio > MOUTH_OPEN_RATIO_THRESHOLD
                   ? { phase: "open", startedAt: mouthNow, closedAt: null, stableFrames: nextFrames }
-                  : { ...ms, stableFrames: nextFrames };
-              } else {
-                if (ms.stableFrames > 0) mouthStateRef.current = { ...ms, stableFrames: 0 };
+                  : { ...ms, startedAt: ms.startedAt ?? mouthNow, stableFrames: nextFrames };
+              } else if (mouthClosed && ms.stableFrames > 0 && ms.startedAt !== null
+                && mouthNow - ms.startedAt >= MOUTH_MIN_OPEN_MS) {
+                // Even one camera frame can represent a deliberate quick opening.
+                mouthStateRef.current = { phase: "first-closed", startedAt: ms.startedAt, closedAt: mouthNow, stableFrames: 0 };
+              } else if (ms.stableFrames > 0) {
+                mouthStateRef.current = idleState;
               }
             }
           }
+          updateDetectionFeedback(mouthStateRef.current);
 
         });
 
@@ -486,23 +487,30 @@ export default function Home() {
           facingMode: "user",
         });
 
+        ownedCamera = camera;
         cameraInstanceRef.current = camera;
         await camera.start();
-        setCameraPermission("granted");
-
-        if (!cancelled) {
-          updateGestureText("입모양 감지 준비됨");
+        if (cancelled) {
+          await camera.stop();
+          return;
         }
+        setCameraPermission("granted");
+        setDetectionStatus("얼굴을 찾고 있어요");
       } catch (error) {
         console.error("mediapipe init error", error);
+        if (cancelled) return;
         await stopCamera();
         if (!cancelled) {
           if (error instanceof DOMException && error.name === "NotAllowedError") {
             setCameraPermission("denied");
           }
           setCameraEnabled(false);
-          void writeReaderValue(MOTION_DETECTION_ENABLED_KEY, false);
-          updateGestureText("카메라 권한 허용이 필요합니다.");
+          const message = error instanceof DOMException && error.name === "NotAllowedError"
+            ? "카메라 접근을 허용해 주세요"
+            : "카메라를 연결하지 못했어요. 연결 상태를 확인해 주세요";
+          setCameraError(message);
+          setDetectionStatus(message);
+          updateGestureText(message);
         }
       }
     };
@@ -513,7 +521,7 @@ export default function Home() {
       cancelled = true;
       void stopCamera();
     };
-  }, [cameraEnabled, cameraPermission]);
+  }, [cameraEnabled]);
 
   const onFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -691,15 +699,24 @@ export default function Home() {
   };
 
   const handleCameraAction = () => {
-    if (cameraEnabled) {
-      setCameraEnabled(false);
-      void writeReaderValue(MOTION_DETECTION_ENABLED_KEY, false);
+    setCameraError(null);
+    setCameraEnabled((enabled) => !enabled);
+  };
+
+  const updateDetectionFeedback = (state: MouthDetectionState | null) => {
+    setIsGestureActive(state !== null && (state.phase !== "idle" || state.stableFrames > 0));
+    if (!state) {
+      setDetectionStatus("얼굴이 카메라에 보이도록 해주세요");
+      setMouthProgress(0);
       return;
     }
-
-    setCameraEnabled(true);
-    void writeReaderValue(MOTION_DETECTION_ENABLED_KEY, true);
-    updateGestureText("모션 감지 권한 창이 뜨면 허용해 주세요.");
+    setMouthProgress(state.phase === "open" && state.startedAt !== null
+      ? Math.min(100, Math.round((performance.now() - state.startedAt) / mouthHoldDurationRef.current * 100))
+      : 0);
+    setDetectionStatus(state.phase === "waiting-close" ? "입을 닫으면 다시 넘길 수 있어요"
+      : state.phase === "open" ? "조금만 유지하세요 · 다음 페이지 →"
+      : state.phase === "first-closed" ? "바로 다시 벌리면 이전 페이지로 이동해요"
+      : "준비됐어요 · 입을 벌리면 다음 페이지");
   };
 
   const revealFocusControls = () => {
@@ -781,42 +798,84 @@ export default function Home() {
   const hasLoadedPdf = pdfDoc !== null;
   const cameraPermissionOn = cameraPermission === "granted";
   const isCameraReady = cameraEnabled && cameraPermissionOn;
-  const cameraStatusText = isCameraReady ? "준비됨" : cameraPermission === "denied" ? "권한 필요" : "대기 중";
-  const cameraButtonText = cameraEnabled
-    ? "모션 감지 끄기"
-    : cameraPermission === "denied"
-      ? "모션 감지 권한 확인"
-      : "모션 감지 켜기";
-  const viewerTitle = hasLoadedPdf ? `${currentFileName ?? "불러온 악보"} (${currentPage}/${pageCount})` : "악보";
-  const gestureOverlayText = (() => {
-    if (gestureText.includes("인식됨")) {
-      return gestureText;
-    }
+  const cameraButtonText = cameraEnabled ? "잠시 멈추기"
+    : cameraPermission === "denied" ? "카메라 허용하기" : "다시 시작";
+  const viewerTitle = currentFileName ?? "불러온 악보";
+  const gestureOverlayText = ["다음 페이지", "이전 페이지", "마지막 페이지", "첫 페이지"].includes(gestureText)
+    ? gestureText : null;
+  const uploadAction = (text: string) => (
+    <label className="file-label primary-upload-action">
+      <strong>{text}</strong>
+      <input type="file" accept="application/pdf" onChange={onFileChange} />
+    </label>
+  );
 
-    if (gestureText === "다음 페이지" || gestureText === "이전 페이지") {
-      return gestureText;
-    }
+  const detectionFeedback = (
+    <div className="detection-feedback">
+      <p role="status">{cameraError ?? (isFocusMode && gestureOverlayText ? gestureOverlayText : detectionStatus)}</p>
+      <div className="hold-progress" role="progressbar" aria-label="다음 페이지 동작 진행" aria-valuemin={0} aria-valuemax={100} aria-valuenow={mouthProgress}>
+        <div style={{ width: `${mouthProgress}%` }} />
+      </div>
+    </div>
+  );
 
-    if (gestureText === "마지막 페이지" || gestureText === "첫 페이지") {
-      return gestureText;
-    }
+  return (
+    <main className={`app-shell ${isFocusMode ? "is-focus-mode" : ""} ${isFocusControlsVisible ? "show-focus-controls" : ""}`}>
+      <header className="topbar">
+        <div className="brand-block"><h1>입으로 넘기는 악보</h1><p>손은 연주에, 페이지는 입으로.</p></div>
+        <div className="topbar-actions">
+          {hasLoadedPdf ? uploadAction("악보 변경") : null}
+          <button type="button" className="secondary-button" onClick={() => setIsLibraryOpen((prev) => !prev)} aria-expanded={isLibraryOpen} aria-controls="saved-library">최근 악보</button>
+        </div>
+      </header>
 
-    return null;
-  })();
-  const motionGuideSection = (
-    <section className="motion-guide-card">
-      <button
-        type="button"
-        className="motion-guide-toggle"
-        onClick={() => setIsMotionGuideExpanded((prev) => !prev)}
-        aria-expanded={isMotionGuideExpanded}
-      >
-        <h3>사용법</h3>
-        <span className="motion-guide-toggle-text">{isMotionGuideExpanded ? "접기" : "펼치기"}</span>
-      </button>
-      {isMotionGuideExpanded ? (
-        <div className="motion-guide-content">
-          <label className="mouth-duration-setting">
+      {cameraPermission === "denied" ? <p className="permission-help">입으로 넘기려면 카메라 권한이 필요해요. 주소창의 사이트 설정에서 카메라를 허용한 뒤 ‘카메라 허용하기’를 눌러주세요.</p> : null}
+      <section className="motion-bar" aria-label="입으로 페이지 넘기기">
+        <div className="motion-bar-copy"><span className={`status-dot ${isCameraReady ? "is-ready" : ""}`} aria-hidden="true" /><strong>입으로 페이지 넘기기</strong><span>{cameraEnabled ? "자동으로 시작됩니다" : cameraError ? "카메라 확인 필요" : "잠시 멈춤"}</span></div>
+        <button type="button" className="camera-toggle" onClick={handleCameraAction} aria-pressed={cameraEnabled}>{cameraButtonText}</button>
+      </section>
+
+      {isLibraryOpen ? (
+        <section className="saved-library" id="saved-library" aria-label="최근 악보">
+          <h2>최근 악보</h2>
+          {savedScores.length === 0 ? <p className="library-empty">악보를 열면 여기에 자동으로 저장돼요.</p> : (
+            <ul className="saved-score-list">{savedScores.map((score) => (
+              <li key={score.id} className="saved-score-item">
+                <button type="button" className="saved-score-open" onClick={() => { setIsLibraryOpen(false); void openSavedScore(score); }}><strong>{score.name}</strong><span>{score.currentPage}페이지부터 이어보기</span></button>
+                <button type="button" className="saved-score-delete" aria-label={`${score.name} 삭제`} onClick={() => void deleteSavedScore(score.id)}>삭제</button>
+              </li>
+            ))}</ul>
+          )}
+        </section>
+      ) : null}
+
+      <section className="workspace-grid">
+        <div className="viewer-card" onMouseMove={isFocusMode ? revealFocusControls : undefined} onTouchStart={isFocusMode ? revealFocusControls : undefined}>
+          {isFocusMode ? <button type="button" className="focus-close-button" onClick={() => setIsFocusMode(false)} aria-label="집중 모드 닫기" title="집중 모드 닫기 (Esc)"><span aria-hidden="true">×</span></button> : null}
+          {isFocusMode && cameraEnabled && !cameraError && isGestureActive ? <div className="focus-detection-feedback">{detectionFeedback}</div> : null}
+          {gestureOverlayText && !isFocusMode ? <div className="gesture-overlay-text" role="status">{gestureOverlayText}</div> : null}
+          <div className="viewer-toolbar">
+            <div className="viewer-heading"><h2>{hasLoadedPdf ? viewerTitle : "악보를 열고 바로 시작하세요"}</h2></div>
+            {hasLoadedPdf ? <div className="page-buttons"><button type="button" onClick={() => setIsFocusMode((prev) => !prev)}>{isFocusMode ? "집중 모드 종료" : "집중 모드"}</button></div> : null}
+          </div>
+          <div className="pdf-viewer" onPointerDown={handlePageSwipeStart} onPointerUp={handlePageSwipeEnd} onPointerCancel={() => { touchStartRef.current = null; }}>
+            <canvas ref={canvasRef} hidden={!hasLoadedPdf} />
+            {!hasLoadedPdf ? <div className="empty-viewer">
+              <div className="empty-viewer-content"><span className="empty-eyebrow">HANDS FREE PDF READER</span><h2>손을 쓰지 않고<br />악보를 넘겨보세요</h2><p>입을 벌리고 잠깐 유지하면 다음 페이지로 넘어갑니다.</p>{uploadAction("PDF 악보 열기")}<span className="empty-note">카메라 접근을 허용하면 입 움직임을 감지해요.</span></div>
+            </div> : null}
+          </div>
+          {!isFocusMode ? <footer className="reader-footer">
+            {hasLoadedPdf ? <nav className="page-navigation" aria-label="페이지 이동"><button type="button" onClick={() => queuePage(currentPage - 1)} disabled={!canGoPrevious}>← 이전</button><span aria-live="polite"><strong>{currentPage}</strong> / {pageCount}</span><button type="button" onClick={() => queuePage(currentPage + 1)} disabled={!canGoNext}>다음 →</button></nav> : null}
+            {detectionFeedback}
+          </footer> : null}
+        </div>
+      </section>
+
+      <section className="gesture-guide" aria-label="입으로 넘기는 방법">
+        <div className="gesture-tip primary-tip"><span aria-hidden="true">→</span><div><strong>다음 페이지</strong><p>입을 벌리고 잠깐 유지 <span>· {(mouthHoldDurationMs / 1000).toFixed(1)}초</span></p></div></div>
+        <div className="gesture-tip"><span aria-hidden="true">←</span><div><strong>이전 페이지</strong><p>입을 짧게 두 번 벌리기</p></div></div>
+        <button type="button" className="guide-toggle" onClick={() => setIsMotionGuideExpanded((prev) => !prev)} aria-expanded={isMotionGuideExpanded} aria-controls="gesture-details">{isMotionGuideExpanded ? "도움말 닫기" : "자세한 사용법"}</button>
+        {isMotionGuideExpanded ? <div className="gesture-details" id="gesture-details">          <label className="mouth-duration-setting">
             <span>다음 페이지 넘김 시간</span>
             <span className="mouth-duration-control">
               <select
@@ -837,162 +896,10 @@ export default function Home() {
             </span>
             <small>{(mouthHoldDurationMs / 1000).toFixed(1)}초 동안 입을 벌리면 다음 페이지로 넘어갑니다.</small>
           </label>
-          <ol className="motion-guide-list">
-            <li>
-              <span className="motion-guide-step">1.</span>
-              <div>
-                <strong>모션 감지 켜기</strong>
-                <span>상단 버튼을 눌러 카메라를 시작합니다.</span>
-              </div>
-            </li>
-            <li>
-              <span className="motion-guide-step">2.</span>
-              <div>
-                <strong>입을 {(mouthHoldDurationMs / 1000).toFixed(1)}초 벌려 유지</strong>
-                <span>다음 페이지로 이동합니다. 이동 후 입을 닫아 주세요.</span>
-              </div>
-            </li>
-            <li>
-              <span className="motion-guide-step">3.</span>
-              <div>
-                <strong>입을 짧게 두 번 벌리기</strong>
-                <span className="motion-guide-result">이전 페이지 · 짧게 벌렸다 닫고 0.6초 안에 다시 벌려 주세요.</span>
-                <span>두 번째 벌림이 감지되는 즉시 넘어가며, 0.6초를 기다릴 필요는 없습니다.</span>
-              </div>
-            </li>
-            <li>
-              <span className="motion-guide-step">4.</span>
-              <div>
-                <strong>이동 후 입 닫기</strong>
-                <span>입을 닫으면 다음 동작을 받을 수 있습니다.</span>
-              </div>
-            </li>
-            <li>
-              <span className="motion-guide-step">5.</span>
-              <div>
-                <strong>터치·마우스로 페이지 넘기기</strong>
-                <span>PDF 화면을 왼쪽으로 밀면 다음 페이지, 오른쪽으로 밀면 이전 페이지로 이동합니다.</span>
-              </div>
-            </li>
-          </ol>
-        </div>
-      ) : null}
-    </section>
-  );
-
-  return (
-    <main className={`app-shell ${isFocusMode ? "is-focus-mode" : ""} ${isFocusControlsVisible ? "show-focus-controls" : ""}`}>
-      <header className="topbar">
-        <div className="topbar-actions">
-          <div className="topbar-primary-actions">
-            <label className="file-label primary-upload-action">
-              <strong>PDF 불러오기</strong>
-              <input type="file" accept="application/pdf" onChange={onFileChange} />
-            </label>
-          </div>
-
-          <button
-            type="button"
-            className={`camera-toggle compact-action ${isCameraReady ? "is-on" : "is-off"}`}
-            onClick={handleCameraAction}
-            aria-pressed={cameraEnabled}
-          >
-            {cameraButtonText}
-            <span>{cameraStatusText}</span>
-          </button>
-        </div>
-      </header>
-
-      {cameraPermission === "denied" ? <p className="permission-help">카메라 권한이 차단됨. 주소창에서 허용해 주세요.</p> : null}
-
-      <section className="panel-card compact-panel mobile-motion-guide">{motionGuideSection}</section>
-
-      <section className="workspace-grid">
-        <div className="viewer-card" onMouseMove={isFocusMode ? revealFocusControls : undefined}>
-          {gestureOverlayText ? <div className="gesture-overlay-text">{gestureOverlayText}</div> : null}
-          <div className="viewer-toolbar">
-            <div className="viewer-heading">
-              <h2>{viewerTitle}</h2>
-            </div>
-            <div className="page-buttons" aria-label="페이지 이동 버튼">
-              <button
-                type="button"
-                className="library-toggle-button"
-                onClick={() => setIsLibraryOpen((prev) => !prev)}
-                aria-expanded={isLibraryOpen}
-              >
-                저장된 악보 {isLibraryOpen ? "숨기기" : "보기"}
-              </button>
-              <button type="button" onClick={() => queuePage(currentPage - 1)} disabled={!canGoPrevious}>
-                <span aria-hidden="true">←</span>
-                <span className="sr-only">이전 페이지</span>
-              </button>
-              <button type="button" onClick={() => queuePage(currentPage + 1)} disabled={!canGoNext}>
-                <span aria-hidden="true">→</span>
-                <span className="sr-only">다음 페이지</span>
-              </button>
-              <button type="button" onClick={() => setIsFocusMode((prev) => !prev)}>
-                <span aria-hidden="true">{isFocusMode ? "⤡" : "⤢"}</span>
-                <span className="sr-only">{isFocusMode ? "전체보기 종료" : "전체보기"}</span>
-              </button>
-            </div>
-          </div>
-
-          <div
-            className="pdf-viewer"
-            onPointerDown={handlePageSwipeStart}
-            onPointerUp={handlePageSwipeEnd}
-            onPointerCancel={() => {
-              touchStartRef.current = null;
-            }}
-          >
-            <button
-              type="button"
-              className="focus-controls-hit-area"
-              onClick={revealFocusControls}
-              aria-label="전체화면 컨트롤 보기"
-            />
-            <canvas ref={canvasRef} />
-            {!hasLoadedPdf ? (
-              <div className="empty-viewer">
-                <strong>PDF를 불러오세요</strong>
-              </div>
-            ) : null}
-          </div>
-        </div>
-
-        <aside className="side-panel">
-          <div className="panel-card compact-panel desktop-motion-guide">{motionGuideSection}</div>
-          <section className="panel-card compact-panel" aria-label="입모양 감지 상태">
-            <h2>입모양 감지</h2>
-            <p role="status">{gestureText}</p>
-          </section>
-
-          <video ref={videoRef} autoPlay muted playsInline className="camera-feed-hidden" />
-
-          {isLibraryOpen ? (
-            <section className="saved-library" aria-label="저장된 악보 목록">
-              {savedScores.length === 0 ? (
-                <p className="library-empty">저장된 악보가 아직 없습니다.</p>
-              ) : (
-                <ul className="saved-score-list">
-                  {savedScores.map((score) => (
-                    <li key={score.id} className="saved-score-item">
-                      <button type="button" className="saved-score-open" onClick={() => openSavedScore(score)}>
-                        <strong>{score.name}</strong>
-                        <span>마지막 페이지 {score.currentPage}</span>
-                      </button>
-                      <button type="button" className="saved-score-delete" onClick={() => void deleteSavedScore(score.id)}>
-                        삭제
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
-          ) : null}
-        </aside>
+<p>페이지가 넘어가면 입을 닫아주세요. 이전 페이지로 가려면 입을 짧게 벌렸다 닫고 바로 다시 벌리세요. 이동 후에는 1.2초 뒤에 다시 넘길 수 있어요. 얼굴이 잘 보이지 않으면 카메라 위치와 주변 밝기를 확인해 주세요. PDF 화면을 왼쪽으로 밀면 다음 페이지, 오른쪽으로 밀면 이전 페이지로 이동해요.</p></div> : null}
       </section>
+      <p className="sr-only" role="status">{gestureText}</p>
+      <video ref={videoRef} autoPlay muted playsInline className="camera-feed-hidden" />
     </main>
   );
 }
