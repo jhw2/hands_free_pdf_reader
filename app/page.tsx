@@ -36,6 +36,8 @@ type SessionState = {
   savedScoreId: string | null;
 };
 
+type PracticeResult = "listening" | "success" | "held" | "missed" | "previous";
+
 type MouthPhase = "idle" | "open" | "first-closed" | "waiting-close";
 
 type MouthDetectionState = {
@@ -106,6 +108,12 @@ const writeReaderValue = async (key: string, value: unknown) => {
 };
 
 export default function Home() {
+  const practiceDialogRef = useRef<HTMLDialogElement>(null);
+  const practiceRef = useRef<{ active: boolean; result: PracticeResult; phase: MouthPhase | null; target: "left" | "right" }>({ active: false, result: "listening", phase: null, target: "right" });
+  const [practiceTarget, setPracticeTarget] = useState<"left" | "right">("right");
+  const [practiceResult, setPracticeResult] = useState<PracticeResult>("listening");
+  const [practicePhase, setPracticePhase] = useState<MouthPhase | null>(null);
+  const [demoKey, setDemoKey] = useState(0);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [pageText, setPageText] = useState("페이지: 0 / 0");
@@ -116,7 +124,6 @@ export default function Home() {
   const [currentFileName, setCurrentFileName] = useState<string | null>(null);
   const [savedScores, setSavedScores] = useState<SavedScore[]>([]);
   const [isLibraryOpen, setIsLibraryOpen] = useState(false);
-  const [isMotionGuideExpanded, setIsMotionGuideExpanded] = useState(false);
   const [isFocusMode, setIsFocusMode] = useState(false);
   const [isFocusControlsVisible, setIsFocusControlsVisible] = useState(false);
   const [cameraEnabled, setCameraEnabled] = useState(true);
@@ -328,7 +335,7 @@ export default function Home() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
+      if (event.key === "Escape" && !practiceRef.current.active) {
         setIsFocusMode(false);
       }
     };
@@ -578,6 +585,7 @@ export default function Home() {
   };
 
   const queuePage = (pageNumber: number) => {
+    if (practiceRef.current.active) return;
     const pdf = pdfDocRef.current;
     const totalPages = pageCountRef.current;
     const activePage = currentPageRef.current;
@@ -704,6 +712,16 @@ export default function Home() {
   };
 
   const updateDetectionFeedback = (state: MouthDetectionState | null) => {
+    if (practiceRef.current.active) {
+      const previousPhase = practiceRef.current.phase;
+      const nextPhase = state?.phase ?? null;
+      practiceRef.current.phase = nextPhase;
+      setPracticePhase(nextPhase);
+      if (practiceRef.current.target === "left" && practiceRef.current.result === "listening" && previousPhase === "first-closed" && nextPhase === "idle") {
+        practiceRef.current.result = "missed";
+        setPracticeResult("missed");
+      }
+    }
     setIsGestureActive(state !== null && (state.phase !== "idle" || state.stableFrames > 0));
     if (!state) {
       setDetectionStatus("얼굴이 카메라에 보이도록 해주세요");
@@ -715,7 +733,7 @@ export default function Home() {
       : 0);
     setDetectionStatus(state.phase === "waiting-close" ? "입을 닫으면 다시 넘길 수 있어요"
       : state.phase === "open" ? "조금만 유지하세요 · 다음 페이지 →"
-      : state.phase === "first-closed" ? "바로 다시 벌리면 이전 페이지로 이동해요"
+      : state.phase === "first-closed" ? "지금 한 번 더 벌리세요 · 이전 페이지 ←"
       : "준비됐어요 · 입을 벌리면 다음 페이지");
   };
 
@@ -737,6 +755,15 @@ export default function Home() {
   };
 
   const handleGesture = (direction: "left" | "right") => {
+    // Practice uses the real detector, but never reaches navigation or its cooldown.
+    if (practiceRef.current.active) {
+      if (practiceRef.current.result === "listening") {
+        const result = direction === practiceRef.current.target ? "success" : direction === "right" ? "held" : "previous";
+        practiceRef.current.result = result;
+        setPracticeResult(result);
+      }
+      return true;
+    }
     const now = performance.now();
     if (now - lastSwitchTimeRef.current < PAGE_TURN_COOLDOWN_MS) {
       return false;
@@ -793,6 +820,46 @@ export default function Home() {
     return targetRef.current;
   };
 
+  const resetPractice = (target: "left" | "right" = practiceRef.current.target) => {
+    practiceRef.current = { active: true, result: "listening", phase: "waiting-close", target };
+    setPracticeTarget(target);
+    setPracticeResult("listening");
+    setPracticePhase("waiting-close");
+    setMouthProgress(0);
+    // Require a closed mouth so a gesture begun before opening the dialog cannot pass.
+    mouthStateRef.current = { phase: "waiting-close", startedAt: null, closedAt: null, stableFrames: 0 };
+    smoothedMouthRef.current = null;
+    setDemoKey((key) => key + 1);
+  };
+
+  const startPractice = () => {
+    resetPractice("right");
+    setIsFocusMode(false);
+    practiceDialogRef.current?.showModal();
+  };
+
+  const closePractice = () => {
+    practiceRef.current.active = false;
+    mouthStateRef.current = { phase: "waiting-close", startedAt: null, closedAt: null, stableFrames: 0 };
+    smoothedMouthRef.current = null;
+    lastSwitchTimeRef.current = performance.now();
+    setIsGestureActive(false);
+    setMouthProgress(0);
+    touchStartRef.current = null;
+    practiceDialogRef.current?.close();
+  };
+
+  const practiceMessage = practiceResult === "success" ? `${practiceTarget === "right" ? "다음" : "이전"} 페이지 동작이 인식됐어요!`
+    : practiceResult === "held" ? "길게 벌려서 다음 페이지 동작으로 인식됐어요. 첫 번째 벌림을 더 짧게 해보세요."
+    : practiceResult === "previous" ? "두 번 벌려서 이전 페이지 동작으로 인식됐어요. 다음 페이지는 입을 벌린 채 유지해주세요."
+    : practiceResult === "missed" ? "두 번째 벌림을 기다리다 끝났어요. 닫은 뒤 바로 한 번 더 벌려보세요."
+    : practicePhase === "waiting-close" ? "먼저 입을 닫고 준비해주세요."
+    : practicePhase === null ? "얼굴이 카메라에 보이도록 해주세요."
+    : practiceTarget === "right" ? (practicePhase === "open" ? "그대로 조금만 유지하세요!" : "입을 벌리고 잠깐 유지해보세요.")
+    : practicePhase === "first-closed" ? "지금 한 번 더 벌리세요!"
+    : practicePhase === "open" ? "입을 닫고 바로 다시 벌려보세요."
+    : "입을 짧게 벌렸다 닫고, 바로 한 번 더 벌려보세요.";
+
   const canGoPrevious = currentPage > 1;
   const canGoNext = pageCount > 0 && currentPage < pageCount;
   const hasLoadedPdf = pdfDoc !== null;
@@ -824,6 +891,7 @@ export default function Home() {
       <header className="topbar">
         <div className="brand-block"><h1>입으로 넘기는 악보</h1><p>손은 연주에, 페이지는 입으로.</p></div>
         <div className="topbar-actions">
+          <button type="button" className="secondary-button" onClick={startPractice} aria-haspopup="dialog">사용법</button>
           {hasLoadedPdf ? uploadAction("악보 변경") : null}
           <button type="button" className="secondary-button" onClick={() => setIsLibraryOpen((prev) => !prev)} aria-expanded={isLibraryOpen} aria-controls="saved-library">최근 악보</button>
         </div>
@@ -851,12 +919,12 @@ export default function Home() {
 
       <section className="workspace-grid">
         <div className="viewer-card" onMouseMove={isFocusMode ? revealFocusControls : undefined} onTouchStart={isFocusMode ? revealFocusControls : undefined}>
-          {isFocusMode ? <button type="button" className="focus-close-button" onClick={() => setIsFocusMode(false)} aria-label="집중 모드 닫기" title="집중 모드 닫기 (Esc)"><span aria-hidden="true">×</span></button> : null}
+          {isFocusMode ? <button type="button" className="focus-close-button" onClick={() => setIsFocusMode(false)} aria-label="전체 보기 닫기" title="전체 보기 닫기 (Esc)"><span aria-hidden="true">×</span></button> : null}
           {isFocusMode && cameraEnabled && !cameraError && isGestureActive ? <div className="focus-detection-feedback">{detectionFeedback}</div> : null}
           {gestureOverlayText && !isFocusMode ? <div className="gesture-overlay-text" role="status">{gestureOverlayText}</div> : null}
           <div className="viewer-toolbar">
             <div className="viewer-heading"><h2>{hasLoadedPdf ? viewerTitle : "악보를 열고 바로 시작하세요"}</h2></div>
-            {hasLoadedPdf ? <div className="page-buttons"><button type="button" onClick={() => setIsFocusMode((prev) => !prev)}>{isFocusMode ? "집중 모드 종료" : "집중 모드"}</button></div> : null}
+            {hasLoadedPdf ? <div className="page-buttons"><button type="button" onClick={() => setIsFocusMode((prev) => !prev)}>{isFocusMode ? "전체 보기 종료" : "전체 보기"}</button></div> : null}
           </div>
           <div className="pdf-viewer" onPointerDown={handlePageSwipeStart} onPointerUp={handlePageSwipeEnd} onPointerCancel={() => { touchStartRef.current = null; }}>
             <canvas ref={canvasRef} hidden={!hasLoadedPdf} />
@@ -871,11 +939,17 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="gesture-guide" aria-label="입으로 넘기는 방법">
-        <div className="gesture-tip primary-tip"><span aria-hidden="true">→</span><div><strong>다음 페이지</strong><p>입을 벌리고 잠깐 유지 <span>· {(mouthHoldDurationMs / 1000).toFixed(1)}초</span></p></div></div>
-        <div className="gesture-tip"><span aria-hidden="true">←</span><div><strong>이전 페이지</strong><p>입을 짧게 두 번 벌리기</p></div></div>
-        <button type="button" className="guide-toggle" onClick={() => setIsMotionGuideExpanded((prev) => !prev)} aria-expanded={isMotionGuideExpanded} aria-controls="gesture-details">{isMotionGuideExpanded ? "도움말 닫기" : "자세한 사용법"}</button>
-        {isMotionGuideExpanded ? <div className="gesture-details" id="gesture-details">          <label className="mouth-duration-setting">
+      <dialog ref={practiceDialogRef} className="practice-dialog" aria-labelledby="practice-title" aria-describedby="practice-description" onClose={closePractice}>
+        <div className="practice-heading"><span className="empty-eyebrow">직접 따라 해보세요</span><button type="button" onClick={closePractice} aria-label="사용법 닫기" autoFocus>×</button></div>
+        <h2 id="practice-title">사용법</h2>
+        <div className="guide-directions" role="group" aria-label="배울 동작 선택">
+          <button type="button" aria-pressed={practiceTarget === "right"} onClick={() => resetPractice("right")}>다음 페이지 →</button>
+          <button type="button" aria-pressed={practiceTarget === "left"} onClick={() => resetPractice("left")}>← 이전 페이지</button>
+        </div>
+        <p id="practice-description">{practiceTarget === "right"
+          ? `입을 벌리고 ${(mouthHoldDurationMs / 1000).toFixed(1)}초 동안 유지하세요. 한 번 넘긴 뒤에는 입을 닫아주세요.`
+          : "입을 짧게 벌렸다 닫고, 바로 한 번 더 벌리세요. 두 번째 벌림에 이전 페이지로 넘어갑니다."}</p>
+        {practiceTarget === "right" ? <label className="mouth-duration-setting">
             <span>다음 페이지 넘김 시간</span>
             <span className="mouth-duration-control">
               <select
@@ -884,6 +958,7 @@ export default function Home() {
                   const nextDuration = Number(event.target.value);
                   mouthHoldDurationRef.current = nextDuration;
                   setMouthHoldDurationMs(nextDuration);
+                  resetPractice();
                   window.localStorage.setItem(MOUTH_HOLD_DURATION_STORAGE_KEY, String(nextDuration));
                 }}
               >
@@ -895,9 +970,25 @@ export default function Home() {
               </select>
             </span>
             <small>{(mouthHoldDurationMs / 1000).toFixed(1)}초 동안 입을 벌리면 다음 페이지로 넘어갑니다.</small>
-          </label>
-<p>페이지가 넘어가면 입을 닫아주세요. 이전 페이지로 가려면 입을 짧게 벌렸다 닫고 바로 다시 벌리세요. 이동 후에는 1.2초 뒤에 다시 넘길 수 있어요. 얼굴이 잘 보이지 않으면 카메라 위치와 주변 밝기를 확인해 주세요. PDF 화면을 왼쪽으로 밀면 다음 페이지, 오른쪽으로 밀면 이전 페이지로 이동해요.</p></div> : null}
-      </section>
+          </label> : null}
+        <div className="practice-demo" key={demoKey}>
+          <div className="demo-face" aria-hidden="true"><span className="demo-eyes">· ·</span><span className={`demo-mouth ${practiceTarget === "right" ? "is-next" : ""}`} style={practiceTarget === "right" ? { animationDuration: `${mouthHoldDurationMs * 2}ms` } : undefined} /></div>
+          <ol className="demo-steps">{practiceTarget === "right" ? <><li>벌리기</li><li>잠깐 유지</li><li>닫기</li></> : <><li>짧게 벌리기</li><li>닫기</li><li>한 번 더 벌리기</li></>}</ol>
+        </div>
+        <div className={`practice-feedback ${practiceResult === "success" ? "is-success" : ""}`} role="status">
+          {cameraError ?? (!cameraEnabled ? "카메라를 켜면 내 동작을 확인할 수 있어요." : practiceMessage)}
+        </div>
+        {practiceResult === "listening" && practiceTarget === "right" && cameraEnabled && !cameraError ? <div className="hold-progress" role="progressbar" aria-label="다음 페이지 동작 연습 진행" aria-valuemin={0} aria-valuemax={100} aria-valuenow={mouthProgress}><div style={{ width: `${mouthProgress}%` }} /></div> : null}
+        <div className="practice-actions">
+          {!cameraEnabled ? <button type="button" onClick={handleCameraAction}>카메라 켜고 연습</button> : null}
+          {practiceResult !== "listening" ? <button type="button" onClick={() => resetPractice()}>다시 연습</button> : null}
+          {practiceResult === "success" && practiceTarget === "right" ? <button type="button" onClick={() => resetPractice("left")}>이전 페이지도 해보기</button> : null}
+          <button type="button" onClick={closePractice}>닫기</button>
+        </div>
+        <p className="practice-note">사용법을 따라 하는 동안 실제 악보는 넘어가지 않아요.</p>
+        <p className="practice-note">악보를 왼쪽으로 밀면 다음, 오른쪽으로 밀면 이전 페이지로 이동할 수도 있어요.</p>
+
+      </dialog>
       <p className="sr-only" role="status">{gestureText}</p>
       <video ref={videoRef} autoPlay muted playsInline className="camera-feed-hidden" />
     </main>
