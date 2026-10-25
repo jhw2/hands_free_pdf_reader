@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useLanguage } from "../lib/use-language";
 import type { Camera as MediaPipeCamera } from "@mediapipe/camera_utils";
 import type { FaceMesh as MediaPipeFaceMesh, NormalizedLandmark, Results } from "@mediapipe/face_mesh";
 
@@ -110,6 +111,7 @@ const writeReaderValue = async (key: string, value: unknown) => {
 };
 
 export default function Home() {
+  const { language, chooseLanguage, t } = useLanguage();
   const practiceDialogRef = useRef<HTMLDialogElement>(null);
   const practiceRef = useRef<{ open: boolean; active: boolean; result: PracticeResult; phase: MouthPhase | null; target: "left" | "right" }>({ open: false, active: false, result: "listening", phase: null, target: "right" });
   const [isPracticeActive, setIsPracticeActive] = useState(false);
@@ -694,7 +696,7 @@ export default function Home() {
 
     const nextScore: SavedScore = {
       id: currentSavedScoreIdRef.current ?? crypto.randomUUID(),
-      name: currentFileNameRef.current ?? `악보 ${savedScoresRef.current.length + 1}`,
+      name: currentFileNameRef.current ?? t("악보 {number}", { number: savedScoresRef.current.length + 1 }),
       pdfBlob: currentPdfBlobRef.current,
       currentPage: currentPageRef.current,
       updatedAt: Date.now(),
@@ -931,7 +933,7 @@ export default function Home() {
   const isCameraReady = cameraEnabled && cameraPermissionOn;
   const cameraButtonText = cameraEnabled ? "잠시 멈추기"
     : cameraPermission === "denied" ? "카메라 허용하기" : "다시 시작";
-  const viewerTitle = currentFileName ?? "불러온 악보";
+  const viewerTitle = currentFileName ?? t("불러온 악보");
   const gestureOverlayText = ["다음 페이지", "이전 페이지", "마지막 페이지", "첫 페이지"].includes(gestureText)
     ? gestureText : null;
   const uploadAction = (text: string) => (
@@ -950,8 +952,8 @@ export default function Home() {
 
   const detectionFeedback = (
     <div className="detection-feedback">
-      <p role="status">{cameraError ?? (isFocusMode ? compactDetectionStatus : detectionStatus)}</p>
-      <div className="hold-progress" role="progressbar" aria-label="다음 페이지 동작 진행" aria-valuemin={0} aria-valuemax={100} aria-valuenow={mouthProgress}>
+      <p role="status">{t(cameraError ?? (isFocusMode ? compactDetectionStatus : detectionStatus))}</p>
+      <div className="hold-progress" role="progressbar" aria-label={t("다음 페이지 동작 진행")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={mouthProgress}>
         <div style={{ width: `${mouthProgress}%` }} />
       </div>
     </div>
@@ -960,29 +962,36 @@ export default function Home() {
   return (
     <main className={`app-shell ${isFocusMode ? "is-focus-mode" : ""} ${isFocusControlsVisible ? "show-focus-controls" : ""}`}>
       <header className="topbar">
-        <div className="brand-block"><h1>입으로 넘기는 악보</h1><p>손은 연주에, 페이지는 입으로.</p></div>
+        <div className="brand-block"><h1>{t("입으로 넘기는 악보")}</h1><p>{t("손은 연주에, 페이지는 입으로.")}</p></div>
         <div className="topbar-actions">
-          <button type="button" className="usage-guide-button" onClick={openUsageGuide} aria-haspopup="dialog">사용법</button>
-          {hasLoadedPdf ? uploadAction("악보 변경") : null}
-          <button type="button" className="secondary-button" onClick={() => setIsLibraryOpen((prev) => !prev)} aria-expanded={isLibraryOpen} aria-controls="saved-library">최근 악보</button>
+          <label className="language-control">
+            <span className="sr-only">{t("언어")}</span>
+            <select value={language} onChange={(event) => chooseLanguage(event.target.value as "ko" | "en")}>
+              <option value="ko" lang="ko">한국어</option>
+              <option value="en" lang="en">English</option>
+            </select>
+          </label>
+          <button type="button" className="usage-guide-button" onClick={openUsageGuide} aria-haspopup="dialog">{t("사용법")}</button>
+          {hasLoadedPdf ? uploadAction(t("악보 변경")) : null}
+          <button type="button" className="secondary-button" onClick={() => setIsLibraryOpen((prev) => !prev)} aria-expanded={isLibraryOpen} aria-controls="saved-library">{t("최근 악보")}</button>
         </div>
       </header>
 
-      {storageError ? <div className="storage-error" role="alert"><p>{storageError}</p><button type="button" onClick={() => void retryStorage()}>다시 저장</button></div> : null}
-      {cameraPermission === "denied" ? <p className="permission-help">입으로 넘기려면 카메라 권한이 필요해요. 주소창의 사이트 설정에서 카메라를 허용한 뒤 ‘카메라 허용하기’를 눌러주세요.</p> : null}
-      <section className="motion-bar" aria-label="입으로 페이지 넘기기">
-        <div className="motion-bar-copy"><span className={`status-dot ${isCameraReady ? "is-ready" : ""}`} aria-hidden="true" /><strong>입으로 페이지 넘기기</strong><span>{cameraEnabled ? "자동으로 시작됩니다" : cameraError ? "카메라 확인 필요" : "잠시 멈춤"}</span></div>
-        <button type="button" className="camera-toggle" onClick={handleCameraAction} aria-pressed={cameraEnabled}>{cameraButtonText}</button>
+      {storageError ? <div className="storage-error" role="alert"><p>{t(storageError)}</p><button type="button" onClick={() => void retryStorage()}>{t("다시 저장")}</button></div> : null}
+      {cameraPermission === "denied" ? <p className="permission-help">{t("입으로 넘기려면 카메라 권한이 필요해요. 주소창의 사이트 설정에서 카메라를 허용한 뒤 ‘카메라 허용하기’를 눌러주세요.")}</p> : null}
+      <section className="motion-bar" aria-label={t("입으로 페이지 넘기기")}>
+        <div className="motion-bar-copy"><span className={`status-dot ${isCameraReady ? "is-ready" : ""}`} aria-hidden="true" /><strong>{t("입으로 페이지 넘기기")}</strong><span>{cameraEnabled ? t("자동으로 시작됩니다") : cameraError ? t("카메라 확인 필요") : t("잠시 멈춤")}</span></div>
+        <button type="button" className="camera-toggle" onClick={handleCameraAction} aria-pressed={cameraEnabled}>{t(cameraButtonText)}</button>
       </section>
 
       {isLibraryOpen ? (
-        <section className="saved-library" id="saved-library" aria-label="최근 악보">
-          <h2>최근 악보</h2>
-          {savedScores.length === 0 ? <p className="library-empty">악보를 열면 여기에 자동으로 저장돼요.</p> : (
+        <section className="saved-library" id="saved-library" aria-label={t("최근 악보")}>
+          <h2>{t("최근 악보")}</h2>
+          {savedScores.length === 0 ? <p className="library-empty">{t("악보를 열면 여기에 자동으로 저장돼요.")}</p> : (
             <ul className="saved-score-list">{savedScores.map((score) => (
               <li key={score.id} className="saved-score-item">
-                <button type="button" className="saved-score-open" onClick={() => { setIsLibraryOpen(false); void openSavedScore(score); }}><strong>{score.name}</strong><span>{score.currentPage}페이지부터 이어보기</span></button>
-                <button type="button" className="saved-score-delete" aria-label={`${score.name} 삭제`} onClick={() => void deleteSavedScore(score.id)}>삭제</button>
+                <button type="button" className="saved-score-open" onClick={() => { setIsLibraryOpen(false); void openSavedScore(score); }}><strong>{score.name}</strong><span>{t("{page}페이지부터 이어보기", { page: score.currentPage })}</span></button>
+                <button type="button" className="saved-score-delete" aria-label={t("{name} 삭제", { name: score.name })} onClick={() => void deleteSavedScore(score.id)}>{t("삭제")}</button>
               </li>
             ))}</ul>
           )}
@@ -991,37 +1000,37 @@ export default function Home() {
 
       <section className="workspace-grid">
         <div className="viewer-card" onMouseMove={isFocusMode ? revealFocusControls : undefined} onTouchStart={isFocusMode ? revealFocusControls : undefined}>
-          {isFocusMode ? <button type="button" className="focus-close-button" onClick={() => setIsFocusMode(false)} aria-label="전체 보기 닫기" title="전체 보기 닫기 (Esc)"><span aria-hidden="true">×</span></button> : null}
+          {isFocusMode ? <button type="button" className="focus-close-button" onClick={() => setIsFocusMode(false)} aria-label={t("전체 보기 닫기")} title={t("전체 보기 닫기 (Esc)")}><span aria-hidden="true">×</span></button> : null}
           {isFocusMode ? <div className="focus-feedback-slot">{cameraEnabled && !cameraError && isGestureActive ? <div className="focus-detection-feedback">{detectionFeedback}</div> : null}</div> : null}
           <div className="viewer-toolbar">
-            <div className="viewer-heading"><h2>{hasLoadedPdf ? viewerTitle : "악보를 열고 바로 시작하세요"}</h2></div>
-            {gestureOverlayText && !isFocusMode ? <span className="gesture-notice" role="status">{gestureOverlayText}</span> : null}
-            {hasLoadedPdf ? <div className="page-buttons"><button type="button" onClick={() => setIsFocusMode((prev) => !prev)}>{isFocusMode ? "전체 보기 종료" : "전체 보기"}</button></div> : null}
+            <div className="viewer-heading"><h2>{hasLoadedPdf ? viewerTitle : t("악보를 열고 바로 시작하세요")}</h2></div>
+            {gestureOverlayText && !isFocusMode ? <span className="gesture-notice" role="status">{t(gestureOverlayText)}</span> : null}
+            {hasLoadedPdf ? <div className="page-buttons"><button type="button" onClick={() => setIsFocusMode((prev) => !prev)}>{isFocusMode ? t("전체 보기 종료") : t("전체 보기")}</button></div> : null}
           </div>
           <div className="pdf-viewer" onPointerDown={handlePageSwipeStart} onPointerUp={handlePageSwipeEnd} onPointerCancel={() => { touchStartRef.current = null; }}>
             <canvas ref={canvasRef} hidden={!hasLoadedPdf} />
-            {renderError ? <div className="render-error" role="alert" onPointerDown={(event) => event.stopPropagation()}><p>{renderError}</p><button type="button" onClick={() => void renderPage(pdfDocRef.current, currentPageRef.current, pageCountRef.current)}>다시 시도</button></div> : null}
+            {renderError ? <div className="render-error" role="alert" onPointerDown={(event) => event.stopPropagation()}><p>{t(renderError)}</p><button type="button" onClick={() => void renderPage(pdfDocRef.current, currentPageRef.current, pageCountRef.current)}>{t("다시 시도")}</button></div> : null}
             {!hasLoadedPdf ? <div className="empty-viewer">
-              <div className="empty-viewer-content"><span className="empty-eyebrow">HANDS FREE PDF READER</span><h2>손을 쓰지 않고<br />악보를 넘겨보세요</h2><p>입을 벌리고 잠깐 유지하면 다음 페이지로 넘어갑니다.</p>{uploadAction("PDF 악보 열기")}<span className="empty-note">카메라 접근을 허용하면 입 움직임을 감지해요.</span></div>
+              <div className="empty-viewer-content"><span className="empty-eyebrow">HANDS FREE PDF READER</span><h2>{t("손을 쓰지 않고")}<br />{t("악보를 넘겨보세요")}</h2><p>{t("입을 벌리고 잠깐 유지하면 다음 페이지로 넘어갑니다.")}</p>{uploadAction(t("PDF 악보 열기"))}<span className="empty-note">{t("카메라 접근을 허용하면 입 움직임을 감지해요.")}</span></div>
             </div> : null}
           </div>
           {!isFocusMode ? <footer className="reader-footer">
-            {hasLoadedPdf ? <nav className="page-navigation" aria-label="페이지 이동"><button type="button" onClick={() => queuePage(currentPage - 1)} disabled={!canGoPrevious}>← 이전</button><span aria-live="polite"><strong>{currentPage}</strong> / {pageCount}</span><button type="button" onClick={() => queuePage(currentPage + 1)} disabled={!canGoNext}>다음 →</button></nav> : null}
+            {hasLoadedPdf ? <nav className="page-navigation" aria-label={t("페이지 이동")}><button type="button" onClick={() => queuePage(currentPage - 1)} disabled={!canGoPrevious}>{t("← 이전")}</button><span aria-live="polite"><strong>{currentPage}</strong> / {pageCount}</span><button type="button" onClick={() => queuePage(currentPage + 1)} disabled={!canGoNext}>{t("다음 →")}</button></nav> : null}
             {detectionFeedback}
           </footer> : null}
         </div>
       </section>
 
       <dialog ref={practiceDialogRef} className="practice-dialog" aria-labelledby="practice-title" aria-describedby="practice-description" onClose={closePractice}>
-        <div className="practice-heading"><h2 id="practice-title">사용법</h2><button type="button" onClick={closePractice} aria-label="사용법 닫기" autoFocus>×</button></div>
-        <div className="guide-directions" role="group" aria-label="배울 동작 선택">
-          <button type="button" aria-pressed={practiceTarget === "right"} onClick={() => selectPracticeTarget("right")}>다음 페이지 →</button>
-          <button type="button" aria-pressed={practiceTarget === "left"} onClick={() => selectPracticeTarget("left")}>← 이전 페이지</button>
+        <div className="practice-heading"><h2 id="practice-title">{t("사용법")}</h2><button type="button" onClick={closePractice} aria-label={t("사용법 닫기")} autoFocus>×</button></div>
+        <div className="guide-directions" role="group" aria-label={t("배울 동작 선택")}>
+          <button type="button" aria-pressed={practiceTarget === "right"} onClick={() => selectPracticeTarget("right")}>{t("다음 페이지 →")}</button>
+          <button type="button" aria-pressed={practiceTarget === "left"} onClick={() => selectPracticeTarget("left")}>{t("← 이전 페이지")}</button>
         </div>
-        <h3 className="guide-action-title">{practiceTarget === "right" ? "입을 벌린 채 잠깐 유지하세요" : "짧게 벌렸다 닫고, 한 번 더"}</h3>
+        <h3 className="guide-action-title">{practiceTarget === "right" ? t("입을 벌린 채 잠깐 유지하세요") : t("짧게 벌렸다 닫고, 한 번 더")}</h3>
         <p id="practice-description">{practiceTarget === "right"
-          ? <><strong>{(mouthHoldDurationMs / 1000).toFixed(1)}초 유지</strong>하면 다음 페이지로 넘어가요.<br />넘어간 뒤에는 입을 닫아주세요.</>
-          : <>첫 번째는 짧게 벌렸다 닫고, 곧바로 다시 벌리세요.<br /><strong>두 번째로 벌릴 때</strong> 이전 페이지로 넘어가요.</>}</p>
+          ? <><strong>{t("{seconds}초 유지", { seconds: (mouthHoldDurationMs / 1000).toFixed(1) })}</strong>{t("하면 다음 페이지로 넘어가요.")}<br />{t("넘어간 뒤에는 입을 닫아주세요.")}</>
+          : <>{t("첫 번째는 짧게 벌렸다 닫고, 곧바로 다시 벌리세요.")}<br /><strong>{t("두 번째로 벌릴 때")}</strong>{" "}{t("이전 페이지로 넘어가요.")}</>}</p>
         <div className="practice-demo" key={demoKey}>
           <svg className="demo-portrait" viewBox="0 0 160 174" fill="none" aria-hidden="true" focusable="false">
             <defs>
@@ -1062,10 +1071,10 @@ export default function Home() {
               </g>
             </g>
           </svg>
-          <ol className="demo-steps">{practiceTarget === "right" ? <><li>벌리기</li><li>잠깐 유지</li><li>닫기</li></> : <><li>짧게 벌리기</li><li>닫기</li><li>다시 벌리기</li></>}</ol>
+          <ol className="demo-steps">{practiceTarget === "right" ? <><li>{t("벌리기")}</li><li>{t("잠깐 유지")}</li><li>{t("닫기")}</li></> : <><li>{t("짧게 벌리기")}</li><li>{t("닫기")}</li><li>{t("다시 벌리기")}</li></>}</ol>
         </div>
         {practiceTarget === "right" ? <label className="mouth-duration-setting">
-          <span>입을 벌리고 유지할 시간</span>
+          <span>{t("입을 벌리고 유지할 시간")}</span>
           <span className="mouth-duration-control">
             <select value={mouthHoldDurationMs} onChange={(event) => {
               const nextDuration = Number(event.target.value);
@@ -1074,30 +1083,30 @@ export default function Home() {
               selectPracticeTarget("right");
               window.localStorage.setItem(MOUTH_HOLD_DURATION_STORAGE_KEY, String(nextDuration));
             }}>
-              {MOUTH_HOLD_DURATION_OPTIONS_MS.map((duration) => <option key={duration} value={duration}>{(duration / 1000).toFixed(1)}초</option>)}
+              {MOUTH_HOLD_DURATION_OPTIONS_MS.map((duration) => <option key={duration} value={duration}>{t("{seconds}초", { seconds: (duration / 1000).toFixed(1) })}</option>)}
             </select>
           </span>
-        </label> : <p className="guide-tip">첫 번째 벌림을 길게 유지하면 다음 페이지로 인식돼요. 위 입 모양의 리듬을 참고해주세요.</p>}
-        {!isPracticeActive ? <section className="guide-try" aria-label="동작 연습 시작">
-          <h3>내 동작 확인하기</h3>
-          <p>연습 중에는 실제 악보가 넘어가지 않아요.</p>
-          <button type="button" className="primary-practice-action" onClick={() => resetPractice()}>직접 해보기</button>
-        </section> : <section className="guide-try" aria-label="동작 연습">
-          <h3>{practiceResult === "success" ? "잘했어요!" : "지금은 연습 중이에요"}</h3>
+        </label> : <p className="guide-tip">{t("첫 번째 벌림을 길게 유지하면 다음 페이지로 인식돼요. 위 입 모양의 리듬을 참고해주세요.")}</p>}
+        {!isPracticeActive ? <section className="guide-try" aria-label={t("동작 연습 시작")}>
+          <h3>{t("내 동작 확인하기")}</h3>
+          <p>{t("연습 중에는 실제 악보가 넘어가지 않아요.")}</p>
+          <button type="button" className="primary-practice-action" onClick={() => resetPractice()}>{t("직접 해보기")}</button>
+        </section> : <section className="guide-try" aria-label={t("동작 연습")}>
+          <h3>{practiceResult === "success" ? t("잘했어요!") : t("지금은 연습 중이에요")}</h3>
           <div className={`practice-feedback ${practiceResult === "success" ? "is-success" : ""}`} role="status">
-            {cameraError ?? (!cameraEnabled ? "카메라를 켜면 내 동작을 확인할 수 있어요." : practiceMessage)}
+            {t(cameraError ?? (!cameraEnabled ? "카메라를 켜면 내 동작을 확인할 수 있어요." : practiceMessage))}
           </div>
-          {practiceResult === "listening" && practiceTarget === "right" && cameraEnabled && !cameraError ? <div className="hold-progress" role="progressbar" aria-label="다음 페이지 동작 연습 진행" aria-valuemin={0} aria-valuemax={100} aria-valuenow={mouthProgress}><div style={{ width: `${mouthProgress}%` }} /></div> : null}
+          {practiceResult === "listening" && practiceTarget === "right" && cameraEnabled && !cameraError ? <div className="hold-progress" role="progressbar" aria-label={t("다음 페이지 동작 연습 진행")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={mouthProgress}><div style={{ width: `${mouthProgress}%` }} /></div> : null}
           <div className="practice-actions">
-            {!cameraEnabled ? <button type="button" onClick={handleCameraAction}>카메라 켜고 연습</button> : null}
-            {practiceResult !== "listening" ? <button type="button" onClick={() => resetPractice()}>다시 해보기</button> : null}
-            {practiceResult === "success" && practiceTarget === "right" ? <button type="button" onClick={() => selectPracticeTarget("left")}>이전 페이지 사용법 보기</button> : null}
-            <button type="button" onClick={() => selectPracticeTarget(practiceTarget)}>연습 마치기</button>
+            {!cameraEnabled ? <button type="button" onClick={handleCameraAction}>{t("카메라 켜고 연습")}</button> : null}
+            {practiceResult !== "listening" ? <button type="button" onClick={() => resetPractice()}>{t("다시 해보기")}</button> : null}
+            {practiceResult === "success" && practiceTarget === "right" ? <button type="button" onClick={() => selectPracticeTarget("left")}>{t("이전 페이지 사용법 보기")}</button> : null}
+            <button type="button" onClick={() => selectPracticeTarget(practiceTarget)}>{t("연습 마치기")}</button>
           </div>
-          <p className="practice-note">연습 중에는 실제 악보가 넘어가지 않아요.</p>
+          <p className="practice-note">{t("연습 중에는 실제 악보가 넘어가지 않아요.")}</p>
         </section>}
       </dialog>
-      <p className="sr-only" role="status">{gestureText}</p>
+      <p className="sr-only" role="status">{t(gestureText)}</p>
       <video ref={videoRef} autoPlay muted playsInline className="camera-feed-hidden" />
     </main>
   );

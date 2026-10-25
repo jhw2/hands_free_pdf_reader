@@ -173,3 +173,10 @@ button:focus-visible, .file-label:focus-within { outline: 3px solid #89bdff; out
 .guide-try .practice-feedback { margin-top: 12px; }
 .primary-practice-action { margin-top: 16px; width: 100%; background: #d8e8ff; color: #10203a; border-color: #d8e8ff; font-weight: 700; }
 .primary-practice-action:hover { background: #edf5ff; }
+
+.language-control select { min-height: 44px; max-width: 100%; padding: 10px 12px; border: 1px solid #405878; border-radius: 12px; background: #172336; color: #f4f7fb; font: inherit; cursor: pointer; }
+.language-control select:focus-visible { outline: 3px solid #89bdff; outline-offset: 4px; }
+.topbar { flex-wrap: wrap; }
+.topbar-actions { flex-wrap: wrap; justify-content: flex-end; }
+html:lang(en) .empty-viewer h2 { letter-spacing: -.03em; }
+@media (max-width: 640px) { .language-control select { font-size: .8rem; padding: 10px; } }
