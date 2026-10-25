@@ -111,7 +111,8 @@ const writeReaderValue = async (key: string, value: unknown) => {
 
 export default function Home() {
   const practiceDialogRef = useRef<HTMLDialogElement>(null);
-  const practiceRef = useRef<{ active: boolean; result: PracticeResult; phase: MouthPhase | null; target: "left" | "right" }>({ active: false, result: "listening", phase: null, target: "right" });
+  const practiceRef = useRef<{ open: boolean; active: boolean; result: PracticeResult; phase: MouthPhase | null; target: "left" | "right" }>({ open: false, active: false, result: "listening", phase: null, target: "right" });
+  const [isPracticeActive, setIsPracticeActive] = useState(false);
   const [practiceTarget, setPracticeTarget] = useState<"left" | "right">("right");
   const [practiceResult, setPracticeResult] = useState<PracticeResult>("listening");
   const [practicePhase, setPracticePhase] = useState<MouthPhase | null>(null);
@@ -358,7 +359,7 @@ export default function Home() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !practiceRef.current.active) {
+      if (event.key === "Escape" && !practiceRef.current.open) {
         setIsFocusMode(false);
       }
     };
@@ -616,7 +617,7 @@ export default function Home() {
   };
 
   const queuePage = (pageNumber: number) => {
-    if (practiceRef.current.active) return;
+    if (practiceRef.current.open || practiceRef.current.active) return;
     const pdf = pdfDocRef.current;
     const totalPages = pageCountRef.current;
     const activePage = currentPageRef.current;
@@ -796,6 +797,8 @@ export default function Home() {
   };
 
   const handleGesture = (direction: "left" | "right") => {
+    // Reading instructions must not trigger practice feedback or turn the score.
+    if (practiceRef.current.open && !practiceRef.current.active) return false;
     // Practice uses the real detector, but never reaches navigation or its cooldown.
     if (practiceRef.current.active) {
       if (practiceRef.current.result === "listening") {
@@ -862,7 +865,8 @@ export default function Home() {
   };
 
   const resetPractice = (target: "left" | "right" = practiceRef.current.target) => {
-    practiceRef.current = { active: true, result: "listening", phase: "waiting-close", target };
+    practiceRef.current = { open: true, active: true, result: "listening", phase: "waiting-close", target };
+    setIsPracticeActive(true);
     setPracticeTarget(target);
     setPracticeResult("listening");
     setPracticePhase("waiting-close");
@@ -873,14 +877,28 @@ export default function Home() {
     setDemoKey((key) => key + 1);
   };
 
-  const startPractice = () => {
-    resetPractice("right");
+  const selectPracticeTarget = (target: "left" | "right") => {
+    practiceRef.current = { open: true, active: false, result: "listening", phase: null, target };
+    setIsPracticeActive(false);
+    setPracticeTarget(target);
+    setPracticeResult("listening");
+    setPracticePhase(null);
+    setMouthProgress(0);
+    mouthStateRef.current = { phase: "waiting-close", startedAt: null, closedAt: null, stableFrames: 0 };
+    smoothedMouthRef.current = null;
+    setDemoKey((key) => key + 1);
+  };
+
+  const openUsageGuide = () => {
+    selectPracticeTarget("right");
     setIsFocusMode(false);
     practiceDialogRef.current?.showModal();
   };
 
   const closePractice = () => {
+    practiceRef.current.open = false;
     practiceRef.current.active = false;
+    setIsPracticeActive(false);
     mouthStateRef.current = { phase: "waiting-close", startedAt: null, closedAt: null, stableFrames: 0 };
     smoothedMouthRef.current = null;
     lastSwitchTimeRef.current = performance.now();
@@ -932,7 +950,7 @@ export default function Home() {
       <header className="topbar">
         <div className="brand-block"><h1>입으로 넘기는 악보</h1><p>손은 연주에, 페이지는 입으로.</p></div>
         <div className="topbar-actions">
-          <button type="button" className="secondary-button" onClick={startPractice} aria-haspopup="dialog">사용법</button>
+          <button type="button" className="secondary-button" onClick={openUsageGuide} aria-haspopup="dialog">사용법</button>
           {hasLoadedPdf ? uploadAction("악보 변경") : null}
           <button type="button" className="secondary-button" onClick={() => setIsLibraryOpen((prev) => !prev)} aria-expanded={isLibraryOpen} aria-controls="saved-library">최근 악보</button>
         </div>
@@ -983,54 +1001,54 @@ export default function Home() {
       </section>
 
       <dialog ref={practiceDialogRef} className="practice-dialog" aria-labelledby="practice-title" aria-describedby="practice-description" onClose={closePractice}>
-        <div className="practice-heading"><span className="empty-eyebrow">직접 따라 해보세요</span><button type="button" onClick={closePractice} aria-label="사용법 닫기" autoFocus>×</button></div>
+        <div className="practice-heading"><span className="empty-eyebrow">입 모양으로 악보 넘기기</span><button type="button" onClick={closePractice} aria-label="사용법 닫기" autoFocus>×</button></div>
         <h2 id="practice-title">사용법</h2>
         <div className="guide-directions" role="group" aria-label="배울 동작 선택">
-          <button type="button" aria-pressed={practiceTarget === "right"} onClick={() => resetPractice("right")}>다음 페이지 →</button>
-          <button type="button" aria-pressed={practiceTarget === "left"} onClick={() => resetPractice("left")}>← 이전 페이지</button>
+          <button type="button" aria-pressed={practiceTarget === "right"} onClick={() => selectPracticeTarget("right")}>다음 페이지 →</button>
+          <button type="button" aria-pressed={practiceTarget === "left"} onClick={() => selectPracticeTarget("left")}>← 이전 페이지</button>
         </div>
+        <h3 className="guide-action-title">{practiceTarget === "right" ? "입을 벌린 채 잠깐 유지하세요" : "짧게 벌렸다 닫고, 한 번 더"}</h3>
         <p id="practice-description">{practiceTarget === "right"
-          ? `입을 벌리고 ${(mouthHoldDurationMs / 1000).toFixed(1)}초 동안 유지하세요. 한 번 넘긴 뒤에는 입을 닫아주세요.`
-          : "입을 짧게 벌렸다 닫고, 바로 한 번 더 벌리세요. 두 번째 벌림에 이전 페이지로 넘어갑니다."}</p>
-        {practiceTarget === "right" ? <label className="mouth-duration-setting">
-            <span>다음 페이지 넘김 시간</span>
-            <span className="mouth-duration-control">
-              <select
-                value={mouthHoldDurationMs}
-                onChange={(event) => {
-                  const nextDuration = Number(event.target.value);
-                  mouthHoldDurationRef.current = nextDuration;
-                  setMouthHoldDurationMs(nextDuration);
-                  resetPractice();
-                  window.localStorage.setItem(MOUTH_HOLD_DURATION_STORAGE_KEY, String(nextDuration));
-                }}
-              >
-                {MOUTH_HOLD_DURATION_OPTIONS_MS.map((duration) => (
-                  <option key={duration} value={duration}>
-                    {(duration / 1000).toFixed(1)}초
-                  </option>
-                ))}
-              </select>
-            </span>
-            <small>{(mouthHoldDurationMs / 1000).toFixed(1)}초 동안 입을 벌리면 다음 페이지로 넘어갑니다.</small>
-          </label> : null}
+          ? `${(mouthHoldDurationMs / 1000).toFixed(1)}초 동안 유지하면 다음 페이지로 넘어가요. 넘어간 뒤에는 입을 닫아주세요.`
+          : "첫 번째는 짧게 벌렸다 닫고, 곧바로 다시 벌리세요. 두 번째로 벌릴 때 이전 페이지로 넘어가요."}</p>
         <div className="practice-demo" key={demoKey}>
           <div className="demo-face" aria-hidden="true"><span className="demo-eyes">· ·</span><span className={`demo-mouth ${practiceTarget === "right" ? "is-next" : ""}`} style={practiceTarget === "right" ? { animationDuration: `${mouthHoldDurationMs * 2}ms` } : undefined} /></div>
-          <ol className="demo-steps">{practiceTarget === "right" ? <><li>벌리기</li><li>잠깐 유지</li><li>닫기</li></> : <><li>짧게 벌리기</li><li>닫기</li><li>한 번 더 벌리기</li></>}</ol>
+          <ol className="demo-steps">{practiceTarget === "right" ? <><li>벌리기</li><li>잠깐 유지</li><li>닫기</li></> : <><li>짧게 벌리기</li><li>닫기</li><li>다시 벌리기</li></>}</ol>
         </div>
-        <div className={`practice-feedback ${practiceResult === "success" ? "is-success" : ""}`} role="status">
-          {cameraError ?? (!cameraEnabled ? "카메라를 켜면 내 동작을 확인할 수 있어요." : practiceMessage)}
-        </div>
-        {practiceResult === "listening" && practiceTarget === "right" && cameraEnabled && !cameraError ? <div className="hold-progress" role="progressbar" aria-label="다음 페이지 동작 연습 진행" aria-valuemin={0} aria-valuemax={100} aria-valuenow={mouthProgress}><div style={{ width: `${mouthProgress}%` }} /></div> : null}
-        <div className="practice-actions">
-          {!cameraEnabled ? <button type="button" onClick={handleCameraAction}>카메라 켜고 연습</button> : null}
-          {practiceResult !== "listening" ? <button type="button" onClick={() => resetPractice()}>다시 연습</button> : null}
-          {practiceResult === "success" && practiceTarget === "right" ? <button type="button" onClick={() => resetPractice("left")}>이전 페이지도 해보기</button> : null}
-          <button type="button" onClick={closePractice}>닫기</button>
-        </div>
-        <p className="practice-note">사용법을 따라 하는 동안 실제 악보는 넘어가지 않아요.</p>
-        <p className="practice-note">악보를 왼쪽으로 밀면 다음, 오른쪽으로 밀면 이전 페이지로 이동할 수도 있어요.</p>
-
+        {practiceTarget === "right" ? <label className="mouth-duration-setting">
+          <span>입을 벌리고 유지할 시간</span>
+          <span className="mouth-duration-control">
+            <select value={mouthHoldDurationMs} onChange={(event) => {
+              const nextDuration = Number(event.target.value);
+              mouthHoldDurationRef.current = nextDuration;
+              setMouthHoldDurationMs(nextDuration);
+              selectPracticeTarget("right");
+              window.localStorage.setItem(MOUTH_HOLD_DURATION_STORAGE_KEY, String(nextDuration));
+            }}>
+              {MOUTH_HOLD_DURATION_OPTIONS_MS.map((duration) => <option key={duration} value={duration}>{(duration / 1000).toFixed(1)}초</option>)}
+            </select>
+          </span>
+        </label> : <p className="guide-tip">첫 번째 벌림을 길게 유지하면 다음 페이지로 인식돼요. 위 입 모양의 리듬을 참고해주세요.</p>}
+        {!isPracticeActive ? <section className="guide-try" aria-label="동작 연습 시작">
+          <h3>내 동작도 인식되는지 확인해볼까요?</h3>
+          <p>버튼을 누르면 연습이 시작돼요. 실제 악보는 넘어가지 않아요.</p>
+          <button type="button" className="primary-practice-action" onClick={() => resetPractice()}>직접 해보기</button>
+        </section> : <section className="guide-try" aria-label="동작 연습">
+          <h3>{practiceResult === "success" ? "잘했어요!" : "지금은 연습 중이에요"}</h3>
+          <div className={`practice-feedback ${practiceResult === "success" ? "is-success" : ""}`} role="status">
+            {cameraError ?? (!cameraEnabled ? "카메라를 켜면 내 동작을 확인할 수 있어요." : practiceMessage)}
+          </div>
+          {practiceResult === "listening" && practiceTarget === "right" && cameraEnabled && !cameraError ? <div className="hold-progress" role="progressbar" aria-label="다음 페이지 동작 연습 진행" aria-valuemin={0} aria-valuemax={100} aria-valuenow={mouthProgress}><div style={{ width: `${mouthProgress}%` }} /></div> : null}
+          <div className="practice-actions">
+            {!cameraEnabled ? <button type="button" onClick={handleCameraAction}>카메라 켜고 연습</button> : null}
+            {practiceResult !== "listening" ? <button type="button" onClick={() => resetPractice()}>다시 해보기</button> : null}
+            {practiceResult === "success" && practiceTarget === "right" ? <button type="button" onClick={() => selectPracticeTarget("left")}>이전 페이지 사용법 보기</button> : null}
+            <button type="button" onClick={() => selectPracticeTarget(practiceTarget)}>연습 마치기</button>
+          </div>
+          <p className="practice-note">연습 중에는 실제 악보가 넘어가지 않아요.</p>
+        </section>}
+        <div className="practice-actions"><button type="button" onClick={closePractice}>악보로 돌아가기</button></div>
+        <p className="practice-note">손으로 넘기려면 악보를 왼쪽으로 밀어 다음 페이지, 오른쪽으로 밀어 이전 페이지로 이동하세요.</p>
       </dialog>
       <p className="sr-only" role="status">{gestureText}</p>
       <video ref={videoRef} autoPlay muted playsInline className="camera-feed-hidden" />
