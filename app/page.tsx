@@ -941,9 +941,16 @@ export default function Home() {
     </label>
   );
 
+  const compactDetectionStatus = gestureOverlayText ?? ({
+    "조금만 유지하세요 · 다음 페이지 →": "유지하면 다음 페이지 →",
+    "지금 한 번 더 벌리세요 · 이전 페이지 ←": "한 번 더 벌리면 이전 ←",
+    "입을 닫으면 다시 넘길 수 있어요": "입을 닫아주세요",
+    "준비됐어요 · 입을 벌리면 다음 페이지": "입을 벌려주세요",
+  } as Record<string, string>)[detectionStatus] ?? detectionStatus;
+
   const detectionFeedback = (
     <div className="detection-feedback">
-      <p role="status">{cameraError ?? (isFocusMode && gestureOverlayText ? gestureOverlayText : detectionStatus)}</p>
+      <p role="status">{cameraError ?? (isFocusMode ? compactDetectionStatus : detectionStatus)}</p>
       <div className="hold-progress" role="progressbar" aria-label="다음 페이지 동작 진행" aria-valuemin={0} aria-valuemax={100} aria-valuenow={mouthProgress}>
         <div style={{ width: `${mouthProgress}%` }} />
       </div>
@@ -985,10 +992,10 @@ export default function Home() {
       <section className="workspace-grid">
         <div className="viewer-card" onMouseMove={isFocusMode ? revealFocusControls : undefined} onTouchStart={isFocusMode ? revealFocusControls : undefined}>
           {isFocusMode ? <button type="button" className="focus-close-button" onClick={() => setIsFocusMode(false)} aria-label="전체 보기 닫기" title="전체 보기 닫기 (Esc)"><span aria-hidden="true">×</span></button> : null}
-          {isFocusMode && cameraEnabled && !cameraError && isGestureActive ? <div className="focus-detection-feedback">{detectionFeedback}</div> : null}
-          {gestureOverlayText && !isFocusMode ? <div className="gesture-overlay-text" role="status">{gestureOverlayText}</div> : null}
+          {isFocusMode ? <div className="focus-feedback-slot">{cameraEnabled && !cameraError && isGestureActive ? <div className="focus-detection-feedback">{detectionFeedback}</div> : null}</div> : null}
           <div className="viewer-toolbar">
             <div className="viewer-heading"><h2>{hasLoadedPdf ? viewerTitle : "악보를 열고 바로 시작하세요"}</h2></div>
+            {gestureOverlayText && !isFocusMode ? <span className="gesture-notice" role="status">{gestureOverlayText}</span> : null}
             {hasLoadedPdf ? <div className="page-buttons"><button type="button" onClick={() => setIsFocusMode((prev) => !prev)}>{isFocusMode ? "전체 보기 종료" : "전체 보기"}</button></div> : null}
           </div>
           <div className="pdf-viewer" onPointerDown={handlePageSwipeStart} onPointerUp={handlePageSwipeEnd} onPointerCancel={() => { touchStartRef.current = null; }}>
