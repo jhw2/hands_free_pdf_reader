@@ -1011,7 +1011,39 @@ export default function Home() {
           ? <><strong>{(mouthHoldDurationMs / 1000).toFixed(1)}초 유지</strong>하면 다음 페이지로 넘어가요.<br />넘어간 뒤에는 입을 닫아주세요.</>
           : <>첫 번째는 짧게 벌렸다 닫고, 곧바로 다시 벌리세요.<br /><strong>두 번째로 벌릴 때</strong> 이전 페이지로 넘어가요.</>}</p>
         <div className="practice-demo" key={demoKey}>
-          <div className="demo-face" aria-hidden="true"><span className="demo-eyes">· ·</span><span className={`demo-mouth ${practiceTarget === "right" ? "is-next" : ""}`} style={practiceTarget === "right" ? { animationDuration: `${mouthHoldDurationMs * 2}ms` } : undefined} /></div>
+          <svg className="demo-portrait" viewBox="0 0 160 174" fill="none" aria-hidden="true" focusable="false">
+            <defs>
+              <linearGradient id="demo-skin" x1="80" y1="35" x2="80" y2="140" gradientUnits="userSpaceOnUse"><stop stopColor="#FFE6CF" /><stop offset="1" stopColor="#F5C4AB" /></linearGradient>
+              <linearGradient id="demo-hair" x1="44" y1="20" x2="113" y2="104" gradientUnits="userSpaceOnUse"><stop stopColor="#53415C" /><stop offset="1" stopColor="#302B46" /></linearGradient>
+            </defs>
+            <circle cx="80" cy="83" r="68" fill="#83DFBC" fillOpacity="0.1" />
+            <circle cx="26" cy="47" r="4" fill="#A5EFD2" fillOpacity="0.55" />
+            <circle cx="137" cy="111" r="3" fill="#BBAFEF" fillOpacity="0.65" />
+            <path d="M32 170C34 145 52 135 80 135C108 135 126 145 128 170" fill="#A99BDC" />
+            <path d="M65 130V144C65 157 95 157 95 144V130" fill="#EFB99F" />
+            <path d="M57 140C61 152 70 158 80 158C90 158 99 152 103 140" stroke="#D9D0F6" strokeWidth="5" strokeLinecap="round" />
+            <path d="M36 80C28 43 42 17 78 17C112 14 134 40 124 83L116 109H43L36 80Z" fill="url(#demo-hair)" />
+            <ellipse cx="37" cy="88" rx="9" ry="13" fill="#F3C0A6" />
+            <ellipse cx="123" cy="88" rx="9" ry="13" fill="#F3C0A6" />
+            <path d="M40 63C40 40 120 40 120 63V97C120 122 103 140 80 140C57 140 40 122 40 97V63Z" fill="url(#demo-skin)" />
+            <path d="M37 70C36 35 55 24 78 25C103 22 122 39 123 66C109 64 96 54 89 43C78 60 62 67 37 70Z" fill="url(#demo-hair)" />
+            <path d="M49 38C57 31 66 29 76 30" stroke="#78617F" strokeWidth="4" strokeLinecap="round" />
+            <path d="M52 77C56 74 61 74 65 76M95 76C99 74 104 74 108 77" stroke="#75515B" strokeWidth="2.5" strokeLinecap="round" />
+            <ellipse cx="59" cy="88" rx="4" ry="5.5" fill="#3E3446" />
+            <ellipse cx="101" cy="88" rx="4" ry="5.5" fill="#3E3446" />
+            <circle cx="60" cy="86.5" r="1.3" fill="#FFF9F0" />
+            <circle cx="102" cy="86.5" r="1.3" fill="#FFF9F0" />
+            <ellipse cx="49" cy="101" rx="9" ry="5" fill="#ED9C98" fillOpacity="0.5" />
+            <ellipse cx="111" cy="101" rx="9" ry="5" fill="#ED9C98" fillOpacity="0.5" />
+            <path d="M79 93L77 101C78 103 81 103 83 102" stroke="#D99D85" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            <g transform="translate(80 117)">
+              <g className={`demo-mouth ${practiceTarget === "right" ? "is-next" : ""}`} style={practiceTarget === "right" ? { animationDuration: `${mouthHoldDurationMs * 2}ms` } : undefined}>
+                <ellipse rx="12" ry="13" fill="#583348" stroke="#B76F79" strokeWidth="2" />
+                <path d="M-7-9C-3-11 3-11 7-9L6-5H-6L-7-9Z" fill="#FFF4E8" />
+                <path d="M-8 8C-5 2 5 2 8 8C4 13-4 13-8 8Z" fill="#E99AA3" />
+              </g>
+            </g>
+          </svg>
           <ol className="demo-steps">{practiceTarget === "right" ? <><li>벌리기</li><li>잠깐 유지</li><li>닫기</li></> : <><li>짧게 벌리기</li><li>닫기</li><li>다시 벌리기</li></>}</ol>
         </div>
         {practiceTarget === "right" ? <label className="mouth-duration-setting">
