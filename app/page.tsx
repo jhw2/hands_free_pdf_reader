@@ -1024,20 +1024,26 @@ export default function Home() {
             <circle cx="80" cy="83" r="68" fill="#83DFBC" fillOpacity="0.1" />
             <circle cx="26" cy="47" r="4" fill="#A5EFD2" fillOpacity="0.55" />
             <circle cx="137" cy="111" r="3" fill="#BBAFEF" fillOpacity="0.65" />
+            <path d="M29 76C25 36 45 16 79 16C113 13 135 36 132 77L137 142C138 157 122 164 108 160H51C36 165 21 155 24 140L29 76Z" fill="url(#demo-hair)" />
             <path d="M32 170C34 145 52 135 80 135C108 135 126 145 128 170" fill="#A99BDC" />
             <path d="M65 130V144C65 157 95 157 95 144V130" fill="#EFB99F" />
             <path d="M57 140C61 152 70 158 80 158C90 158 99 152 103 140" stroke="#D9D0F6" strokeWidth="5" strokeLinecap="round" />
-            <path d="M36 80C28 43 42 17 78 17C112 14 134 40 124 83L116 109H43L36 80Z" fill="url(#demo-hair)" />
             <ellipse cx="37" cy="88" rx="9" ry="13" fill="#F3C0A6" />
             <ellipse cx="123" cy="88" rx="9" ry="13" fill="#F3C0A6" />
             <path d="M40 63C40 40 120 40 120 63V97C120 122 103 140 80 140C57 140 40 122 40 97V63Z" fill="url(#demo-skin)" />
-            <path d="M37 70C36 35 55 24 78 25C103 22 122 39 123 66C109 64 96 54 89 43C78 60 62 67 37 70Z" fill="url(#demo-hair)" />
+            <path d="M36 76C33 40 52 23 79 24C105 22 124 40 124 72C108 66 98 54 92 40C80 58 62 70 36 76Z" fill="url(#demo-hair)" />
+            <path d="M38 65C38 93 40 118 47 137C50 146 48 153 42 159C28 150 30 132 31 117L32 74L38 65ZM121 64C120 94 120 118 113 137C110 146 112 153 118 159C132 149 130 132 130 117L128 74L121 64Z" fill="url(#demo-hair)" />
+            <path d="M35 102C35 126 38 140 41 145M126 102C126 125 122 140 119 145" stroke="#78617F" strokeWidth="2" strokeLinecap="round" opacity="0.55" />
+            <path d="M108 47L115 57" stroke="#A5EFD2" strokeWidth="4" strokeLinecap="round" />
             <path d="M49 38C57 31 66 29 76 30" stroke="#78617F" strokeWidth="4" strokeLinecap="round" />
             <path d="M52 77C56 74 61 74 65 76M95 76C99 74 104 74 108 77" stroke="#75515B" strokeWidth="2.5" strokeLinecap="round" />
+            <path d="M54 85L51 82M106 85L109 82" stroke="#3E3446" strokeWidth="2" strokeLinecap="round" />
             <ellipse cx="59" cy="88" rx="4" ry="5.5" fill="#3E3446" />
             <ellipse cx="101" cy="88" rx="4" ry="5.5" fill="#3E3446" />
             <circle cx="60" cy="86.5" r="1.3" fill="#FFF9F0" />
             <circle cx="102" cy="86.5" r="1.3" fill="#FFF9F0" />
+            <circle cx="37" cy="105" r="3" fill="#F5D58F" />
+            <circle cx="123" cy="105" r="3" fill="#F5D58F" />
             <ellipse cx="49" cy="101" rx="9" ry="5" fill="#ED9C98" fillOpacity="0.5" />
             <ellipse cx="111" cy="101" rx="9" ry="5" fill="#ED9C98" fillOpacity="0.5" />
             <path d="M79 93L77 101C78 103 81 103 83 102" stroke="#D99D85" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
