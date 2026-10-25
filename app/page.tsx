@@ -1001,16 +1001,15 @@ export default function Home() {
       </section>
 
       <dialog ref={practiceDialogRef} className="practice-dialog" aria-labelledby="practice-title" aria-describedby="practice-description" onClose={closePractice}>
-        <div className="practice-heading"><span className="empty-eyebrow">입 모양으로 악보 넘기기</span><button type="button" onClick={closePractice} aria-label="사용법 닫기" autoFocus>×</button></div>
-        <h2 id="practice-title">사용법</h2>
+        <div className="practice-heading"><h2 id="practice-title">사용법</h2><button type="button" onClick={closePractice} aria-label="사용법 닫기" autoFocus>×</button></div>
         <div className="guide-directions" role="group" aria-label="배울 동작 선택">
           <button type="button" aria-pressed={practiceTarget === "right"} onClick={() => selectPracticeTarget("right")}>다음 페이지 →</button>
           <button type="button" aria-pressed={practiceTarget === "left"} onClick={() => selectPracticeTarget("left")}>← 이전 페이지</button>
         </div>
         <h3 className="guide-action-title">{practiceTarget === "right" ? "입을 벌린 채 잠깐 유지하세요" : "짧게 벌렸다 닫고, 한 번 더"}</h3>
         <p id="practice-description">{practiceTarget === "right"
-          ? `${(mouthHoldDurationMs / 1000).toFixed(1)}초 동안 유지하면 다음 페이지로 넘어가요. 넘어간 뒤에는 입을 닫아주세요.`
-          : "첫 번째는 짧게 벌렸다 닫고, 곧바로 다시 벌리세요. 두 번째로 벌릴 때 이전 페이지로 넘어가요."}</p>
+          ? <><strong>{(mouthHoldDurationMs / 1000).toFixed(1)}초 유지</strong>하면 다음 페이지로 넘어가요.<br />넘어간 뒤에는 입을 닫아주세요.</>
+          : <>첫 번째는 짧게 벌렸다 닫고, 곧바로 다시 벌리세요.<br /><strong>두 번째로 벌릴 때</strong> 이전 페이지로 넘어가요.</>}</p>
         <div className="practice-demo" key={demoKey}>
           <div className="demo-face" aria-hidden="true"><span className="demo-eyes">· ·</span><span className={`demo-mouth ${practiceTarget === "right" ? "is-next" : ""}`} style={practiceTarget === "right" ? { animationDuration: `${mouthHoldDurationMs * 2}ms` } : undefined} /></div>
           <ol className="demo-steps">{practiceTarget === "right" ? <><li>벌리기</li><li>잠깐 유지</li><li>닫기</li></> : <><li>짧게 벌리기</li><li>닫기</li><li>다시 벌리기</li></>}</ol>
@@ -1030,8 +1029,8 @@ export default function Home() {
           </span>
         </label> : <p className="guide-tip">첫 번째 벌림을 길게 유지하면 다음 페이지로 인식돼요. 위 입 모양의 리듬을 참고해주세요.</p>}
         {!isPracticeActive ? <section className="guide-try" aria-label="동작 연습 시작">
-          <h3>내 동작도 인식되는지 확인해볼까요?</h3>
-          <p>버튼을 누르면 연습이 시작돼요. 실제 악보는 넘어가지 않아요.</p>
+          <h3>내 동작 확인하기</h3>
+          <p>연습 중에는 실제 악보가 넘어가지 않아요.</p>
           <button type="button" className="primary-practice-action" onClick={() => resetPractice()}>직접 해보기</button>
         </section> : <section className="guide-try" aria-label="동작 연습">
           <h3>{practiceResult === "success" ? "잘했어요!" : "지금은 연습 중이에요"}</h3>
@@ -1047,8 +1046,6 @@ export default function Home() {
           </div>
           <p className="practice-note">연습 중에는 실제 악보가 넘어가지 않아요.</p>
         </section>}
-        <div className="practice-actions"><button type="button" onClick={closePractice}>악보로 돌아가기</button></div>
-        <p className="practice-note">손으로 넘기려면 악보를 왼쪽으로 밀어 다음 페이지, 오른쪽으로 밀어 이전 페이지로 이동하세요.</p>
       </dialog>
       <p className="sr-only" role="status">{gestureText}</p>
       <video ref={videoRef} autoPlay muted playsInline className="camera-feed-hidden" />
