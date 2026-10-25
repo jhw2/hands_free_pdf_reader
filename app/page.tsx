@@ -950,7 +950,7 @@ export default function Home() {
       <header className="topbar">
         <div className="brand-block"><h1>입으로 넘기는 악보</h1><p>손은 연주에, 페이지는 입으로.</p></div>
         <div className="topbar-actions">
-          <button type="button" className="secondary-button" onClick={openUsageGuide} aria-haspopup="dialog">사용법</button>
+          <button type="button" className="usage-guide-button" onClick={openUsageGuide} aria-haspopup="dialog">사용법</button>
           {hasLoadedPdf ? uploadAction("악보 변경") : null}
           <button type="button" className="secondary-button" onClick={() => setIsLibraryOpen((prev) => !prev)} aria-expanded={isLibraryOpen} aria-controls="saved-library">최근 악보</button>
         </div>

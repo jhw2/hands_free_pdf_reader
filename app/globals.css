@@ -14,6 +14,10 @@ button:focus-visible, .file-label:focus-within { outline: 3px solid #89bdff; out
 .brand-block h1 { font-size: 1.15rem; }
 .brand-block p { font-size: .85rem; color: #9fb0c6; margin-top: 5px; }
 .topbar-actions { display: flex; align-items: center; gap: 8px; }
+.usage-guide-button { background: #83dfbc; color: #102b22; border-color: #a5efd2; font-weight: 700; box-shadow: 0 3px 12px #83dfbc26; }
+.usage-guide-button:hover { background: #a5efd2; border-color: #c3f8e2; }
+.usage-guide-button:active { background: #6bd0a8; }
+
 .file-label { position: relative; min-height: 44px; padding: 12px 22px; display: inline-flex; align-items: center; justify-content: center; border-radius: 12px; background: #d8e8ff; color: #10203a; }
 .file-label:hover { background: #edf5ff; }
 .file-label input { position: absolute; width: 1px; height: 1px; opacity: 0; }
