@@ -85,6 +85,7 @@ const readReaderValue = async <T,>(key: string): Promise<T | null> => {
       reject(transaction.error);
       db.close();
     };
+    transaction.onabort = transaction.onerror;
   });
 };
 
@@ -104,6 +105,7 @@ const writeReaderValue = async (key: string, value: unknown) => {
       reject(transaction.error);
       db.close();
     };
+    transaction.onabort = transaction.onerror;
   });
 };
 
@@ -123,6 +125,10 @@ export default function Home() {
   const [currentPage, setCurrentPage] = useState(1);
   const [currentFileName, setCurrentFileName] = useState<string | null>(null);
   const [savedScores, setSavedScores] = useState<SavedScore[]>([]);
+  const savedScoresRef = useRef<SavedScore[]>([]);
+  const storageWriteQueueRef = useRef<Promise<unknown>>(Promise.resolve());
+  const [storageError, setStorageError] = useState<string | null>(null);
+  const [renderError, setRenderError] = useState<string | null>(null);
   const [isLibraryOpen, setIsLibraryOpen] = useState(false);
   const [isFocusMode, setIsFocusMode] = useState(false);
   const [isFocusControlsVisible, setIsFocusControlsVisible] = useState(false);
@@ -136,8 +142,8 @@ export default function Home() {
     "unknown"
   );
   const lastSwitchTimeRef = useRef<number>(0);
-  const isRenderingRef = useRef(false);
-  const pendingPageRef = useRef<number | null>(null);
+  const renderPromiseRef = useRef<Promise<void> | null>(null);
+  const pendingRenderRef = useRef<{ pdf: any; pageNumber: number; totalPages: number } | null>(null);
   const cameraInstanceRef = useRef<MediaPipeCamera | null>(null);
   const faceMeshRef = useRef<MediaPipeFaceMesh | null>(null);
   const pdfDocRef = useRef<any>(null);
@@ -194,6 +200,20 @@ export default function Home() {
     }, GESTURE_FEEDBACK_DURATION_MS);
   };
 
+  const persistReaderValue = async (key: string, value: unknown) => {
+    // Keep writes in user-action order, including after a previous write failed.
+    const write = storageWriteQueueRef.current.catch(() => {}).then(() => writeReaderValue(key, value));
+    storageWriteQueueRef.current = write;
+    try {
+      await write;
+      return true;
+    } catch (error) {
+      console.error("reader storage error", error);
+      setStorageError("자동 저장에 실패했어요. 브라우저 저장 공간을 확인한 뒤 다시 저장해 주세요.");
+      return false;
+    }
+  };
+
   const saveSessionState = async (overrides?: Partial<SessionState>) => {
     const sessionState: SessionState = {
       pdfBlob: currentPdfBlobRef.current,
@@ -203,12 +223,13 @@ export default function Home() {
       ...overrides,
     };
 
-    await writeReaderValue(SESSION_STATE_KEY, sessionState);
+    return persistReaderValue(SESSION_STATE_KEY, sessionState);
   };
 
   const saveScoresToDb = async (scores: SavedScore[]) => {
+    savedScoresRef.current = scores;
     setSavedScores(scores);
-    await writeReaderValue(SAVED_SCORES_KEY, scores);
+    return persistReaderValue(SAVED_SCORES_KEY, scores);
   };
 
   const loadPdfDocument = async ({
@@ -243,6 +264,7 @@ export default function Home() {
     currentSavedScoreIdRef.current = savedScoreId;
 
     await renderPage(pdf, safeInitialPage, pdf.numPages);
+    if (pdfDocRef.current !== pdf) return;
     await saveSessionState({
       pdfBlob: blob,
       fileName,
@@ -309,7 +331,8 @@ export default function Home() {
           return;
         }
 
-        setSavedScores(storedScores ?? []);
+        savedScoresRef.current = storedScores ?? [];
+        setSavedScores(savedScoresRef.current);
 
         if (!sessionState?.pdfBlob) {
           return;
@@ -542,9 +565,9 @@ export default function Home() {
         savedScoreId: null,
       });
       const saved = await persistCurrentPdf();
-      updateGestureText(saved ? "PDF를 불러오고 자동 저장했습니다." : "PDF를 불러왔습니다.");
+      updateGestureText(saved ? "PDF를 불러오고 자동 저장했습니다." : "PDF를 불러왔지만 자동 저장하지 못했습니다.");
     } catch (error) {
-      updateGestureText("PDF 라이브러리 로드 실패");
+      updateGestureText("PDF를 열지 못했어요. 파일을 확인하고 다시 시도해 주세요.");
       console.error("pdfjs load error", error);
     } finally {
       event.target.value = "";
@@ -552,36 +575,44 @@ export default function Home() {
   };
 
   const renderPage = async (pdf: any, pageNumber: number, totalPages: number) => {
-    if (!canvasRef.current) return;
-    if (isRenderingRef.current) {
-      pendingPageRef.current = pageNumber;
-      return;
+    pendingRenderRef.current = { pdf, pageNumber, totalPages };
+    if (!renderPromiseRef.current) {
+      const processRequests = async () => {
+        // Publish the shared promise before the worker can finish.
+        await Promise.resolve();
+        try {
+          while (pendingRenderRef.current) {
+            const request = pendingRenderRef.current;
+            pendingRenderRef.current = null;
+            if (request.pdf !== pdfDocRef.current || !canvasRef.current) continue;
+            try {
+              const page = await request.pdf.getPage(request.pageNumber);
+              if (request.pdf !== pdfDocRef.current || !canvasRef.current) continue;
+              const viewport = page.getViewport({ scale: 1.4 });
+              const canvas = canvasRef.current;
+              const ctx = canvas.getContext("2d");
+              if (!ctx) throw new Error("Canvas context unavailable");
+              canvas.width = viewport.width;
+              canvas.height = viewport.height;
+              await page.render({ canvasContext: ctx, viewport }).promise;
+              if (request.pdf === pdfDocRef.current) {
+                setPageText(`페이지: ${request.pageNumber} / ${request.totalPages}`);
+                setRenderError(null);
+              }
+            } catch (error) {
+              console.error("PDF render error", error);
+              if (request.pdf === pdfDocRef.current) {
+                setRenderError("악보를 표시하지 못했어요. 다시 시도해 주세요.");
+              }
+            }
+          }
+        } finally {
+          renderPromiseRef.current = null;
+        }
+      };
+      renderPromiseRef.current = processRequests();
     }
-
-    isRenderingRef.current = true;
-
-    const page = await pdf.getPage(pageNumber);
-    const viewport = page.getViewport({ scale: 1.4 });
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) {
-      isRenderingRef.current = false;
-      return;
-    }
-
-    canvas.width = viewport.width;
-    canvas.height = viewport.height;
-
-    await page.render({ canvasContext: ctx, viewport }).promise;
-    isRenderingRef.current = false;
-
-    setPageText(`페이지: ${pageNumber} / ${totalPages}`);
-
-    if (pendingPageRef.current !== null) {
-      const next = pendingPageRef.current;
-      pendingPageRef.current = null;
-      renderPage(pdf, next, totalPages);
-    }
+    await renderPromiseRef.current;
   };
 
   const queuePage = (pageNumber: number) => {
@@ -601,7 +632,7 @@ export default function Home() {
     void saveSessionState({ currentPage: safePage });
 
     if (currentSavedScoreIdRef.current) {
-      const nextScores = savedScores.map((score) =>
+      const nextScores = savedScoresRef.current.map((score) =>
         score.id === currentSavedScoreIdRef.current ? { ...score, currentPage: safePage, updatedAt: Date.now() } : score
       );
       void saveScoresToDb(nextScores);
@@ -657,20 +688,21 @@ export default function Home() {
 
     const nextScore: SavedScore = {
       id: currentSavedScoreIdRef.current ?? crypto.randomUUID(),
-      name: currentFileNameRef.current ?? `악보 ${savedScores.length + 1}`,
+      name: currentFileNameRef.current ?? `악보 ${savedScoresRef.current.length + 1}`,
       pdfBlob: currentPdfBlobRef.current,
       currentPage: currentPageRef.current,
       updatedAt: Date.now(),
     };
 
     const nextScores = currentSavedScoreIdRef.current
-      ? savedScores.map((score) => (score.id === nextScore.id ? nextScore : score))
-      : [nextScore, ...savedScores];
+      ? savedScoresRef.current.map((score) => (score.id === nextScore.id ? nextScore : score))
+      : [nextScore, ...savedScoresRef.current];
 
     currentSavedScoreIdRef.current = nextScore.id;
-    await saveScoresToDb(nextScores);
-    await saveSessionState({ savedScoreId: nextScore.id });
-    return true;
+    const scoresSaved = await saveScoresToDb(nextScores);
+    const sessionSaved = await saveSessionState({ savedScoreId: nextScore.id });
+    if (scoresSaved && sessionSaved) setStorageError(null);
+    return scoresSaved && sessionSaved;
   };
 
   const openSavedScore = async (score: SavedScore) => {
@@ -682,7 +714,7 @@ export default function Home() {
         savedScoreId: score.id,
       });
 
-      const nextScores = savedScores.map((item) =>
+      const nextScores = savedScoresRef.current.map((item) =>
         item.id === score.id ? { ...item, updatedAt: Date.now() } : item
       );
       await saveScoresToDb(nextScores);
@@ -695,15 +727,24 @@ export default function Home() {
   };
 
   const deleteSavedScore = async (scoreId: string) => {
-    const nextScores = savedScores.filter((score) => score.id !== scoreId);
-    await saveScoresToDb(nextScores);
+    const nextScores = savedScoresRef.current.filter((score) => score.id !== scoreId);
+    const saved = await saveScoresToDb(nextScores);
 
     if (currentSavedScoreIdRef.current === scoreId) {
       currentSavedScoreIdRef.current = null;
       await saveSessionState({ savedScoreId: null });
     }
 
-    updateGestureText("저장된 악보를 삭제했습니다.");
+    updateGestureText(saved ? "저장된 악보를 삭제했습니다." : "목록에서 삭제했지만 저장하지 못했습니다. 다시 저장해 주세요.");
+  };
+
+  const retryStorage = async () => {
+    const scoresSaved = await saveScoresToDb(savedScoresRef.current);
+    const sessionSaved = await saveSessionState();
+    if (scoresSaved && sessionSaved) {
+      setStorageError(null);
+      updateGestureText("악보와 현재 페이지를 다시 저장했습니다.");
+    }
   };
 
   const handleCameraAction = () => {
@@ -897,6 +938,7 @@ export default function Home() {
         </div>
       </header>
 
+      {storageError ? <div className="storage-error" role="alert"><p>{storageError}</p><button type="button" onClick={() => void retryStorage()}>다시 저장</button></div> : null}
       {cameraPermission === "denied" ? <p className="permission-help">입으로 넘기려면 카메라 권한이 필요해요. 주소창의 사이트 설정에서 카메라를 허용한 뒤 ‘카메라 허용하기’를 눌러주세요.</p> : null}
       <section className="motion-bar" aria-label="입으로 페이지 넘기기">
         <div className="motion-bar-copy"><span className={`status-dot ${isCameraReady ? "is-ready" : ""}`} aria-hidden="true" /><strong>입으로 페이지 넘기기</strong><span>{cameraEnabled ? "자동으로 시작됩니다" : cameraError ? "카메라 확인 필요" : "잠시 멈춤"}</span></div>
@@ -928,6 +970,7 @@ export default function Home() {
           </div>
           <div className="pdf-viewer" onPointerDown={handlePageSwipeStart} onPointerUp={handlePageSwipeEnd} onPointerCancel={() => { touchStartRef.current = null; }}>
             <canvas ref={canvasRef} hidden={!hasLoadedPdf} />
+            {renderError ? <div className="render-error" role="alert" onPointerDown={(event) => event.stopPropagation()}><p>{renderError}</p><button type="button" onClick={() => void renderPage(pdfDocRef.current, currentPageRef.current, pageCountRef.current)}>다시 시도</button></div> : null}
             {!hasLoadedPdf ? <div className="empty-viewer">
               <div className="empty-viewer-content"><span className="empty-eyebrow">HANDS FREE PDF READER</span><h2>손을 쓰지 않고<br />악보를 넘겨보세요</h2><p>입을 벌리고 잠깐 유지하면 다음 페이지로 넘어갑니다.</p>{uploadAction("PDF 악보 열기")}<span className="empty-note">카메라 접근을 허용하면 입 움직임을 감지해요.</span></div>
             </div> : null}
