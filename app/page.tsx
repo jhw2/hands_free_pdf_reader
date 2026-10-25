@@ -641,6 +641,11 @@ export default function Home() {
   };
 
   const handlePageSwipeStart = (event: React.PointerEvent<HTMLDivElement>) => {
+    touchStartRef.current = null;
+    if (pageCountRef.current === 0 || practiceRef.current.open) return;
+    // Capturing a label's pointer redirects its click to the viewer, preventing
+    // the browser from opening the associated file input.
+    if (event.target instanceof Element && event.target.closest("button, input, label, a, select, textarea, [role='button']")) return;
     if (event.pointerType === "mouse" && event.button !== 0) {
       return;
     }
