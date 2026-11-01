@@ -927,7 +927,9 @@ export default function Home() {
   };
 
   const updateHeadScroll = (landmarks: NormalizedLandmark[], now: number) => {
-    if (pdfZoomRef.current <= 1 || practiceRef.current.open || !pdfViewerRef.current) {
+    const viewer = pdfViewerRef.current;
+    const canScrollVertically = viewer ? viewer.scrollHeight > viewer.clientHeight + 1 : false;
+    if (!canScrollVertically || practiceRef.current.open || !viewer) {
       resetHeadScroll();
       return;
     }
@@ -938,9 +940,9 @@ export default function Home() {
       return;
     }
 
-    const downwardMovement = pitchRatio - headNeutralRef.current;
-    if (Math.abs(downwardMovement) >= HEAD_TILT_THRESHOLD) {
-      const direction = downwardMovement > 0 ? "down" : "up";
+    const verticalMovement = pitchRatio - headNeutralRef.current;
+    if (Math.abs(verticalMovement) >= HEAD_TILT_THRESHOLD) {
+      const direction = verticalMovement > 0 ? "down" : "up";
       if (headScrollDirectionRef.current !== direction) {
         headScrollDirectionRef.current = direction;
         headTiltStartedAtRef.current = now;
@@ -949,7 +951,7 @@ export default function Home() {
       if (now - (headTiltStartedAtRef.current ?? now) >= HEAD_TILT_HOLD_MS) {
         const elapsed = Math.min(50, now - (headScrollLastFrameRef.current ?? now - 16));
         const distance = HEAD_SCROLL_SPEED_PX_PER_SECOND * elapsed / 1000;
-        pdfViewerRef.current.scrollTop += direction === "down" ? distance : -distance;
+        viewer.scrollTop += direction === "down" ? distance : -distance;
         headScrollLastFrameRef.current = now;
         setHeadScrollDirection(direction);
       }
@@ -962,8 +964,8 @@ export default function Home() {
       headScrollDirectionRef.current = null;
       setHeadScrollDirection(null);
     }
-    if (Math.abs(downwardMovement) < HEAD_TILT_THRESHOLD / 2) {
-      headNeutralRef.current += downwardMovement * HEAD_NEUTRAL_SMOOTHING_ALPHA;
+    if (Math.abs(verticalMovement) < HEAD_TILT_THRESHOLD / 2) {
+      headNeutralRef.current += verticalMovement * HEAD_NEUTRAL_SMOOTHING_ALPHA;
     }
   };
 
@@ -1089,7 +1091,9 @@ export default function Home() {
   );
 
   const headScrollStatus = pdfZoom > 1
-    ? t(headScrollDirection === "down" ? "아래로 스크롤 중" : headScrollDirection === "up" ? "위로 스크롤 중" : "고개를 위아래로 움직여 스크롤")
+    ? t(headScrollDirection === "down" ? "아래로 스크롤 중"
+      : headScrollDirection === "up" ? "위로 스크롤 중"
+      : "고개를 위아래로 움직여 스크롤")
     : null;
 
   return (
@@ -1147,7 +1151,7 @@ export default function Home() {
             </div> : null}
           </div>
           <div ref={pdfViewerRef} className={`pdf-viewer ${pdfZoom > 1 ? "is-zoomed" : ""}`} onPointerDown={handlePageSwipeStart} onPointerUp={handlePageSwipeEnd} onPointerCancel={() => { touchStartRef.current = null; }}>
-            <canvas ref={canvasRef} hidden={!hasLoadedPdf} />
+            <div className="pdf-canvas-stage" hidden={!hasLoadedPdf}><canvas ref={canvasRef} /></div>
             {renderError ? <div className="render-error" role="alert" onPointerDown={(event) => event.stopPropagation()}><p>{t(renderError)}</p><button type="button" onClick={() => void renderPage(pdfDocRef.current, currentPageRef.current, pageCountRef.current)}>{t("다시 시도")}</button></div> : null}
             {!hasLoadedPdf ? <div className="empty-viewer">
               <div className="empty-viewer-content"><span className="empty-eyebrow">HANDS FREE PDF READER</span><h2>{t("손을 쓰지 않고")}<br />{t("악보를 넘겨보세요")}</h2><p>{t("입을 벌리고 잠깐 유지하면 다음 페이지로 넘어갑니다.")}</p>{uploadAction(t("PDF 악보 열기"))}<span className="empty-note">{t("카메라 접근을 허용하면 입 움직임을 감지해요.")}</span></div>
@@ -1171,14 +1175,14 @@ export default function Home() {
           <h3 className="guide-action-title">{t("확대한 악보는 고개로 위아래 이동하세요")}</h3>
           <p id="practice-description">{t("먼저 전체 보기에서 악보를 확대하고 정면을 바라보세요.")}<br /><strong>{t("고개는 스크롤, 입은 페이지 이동")}</strong>{t("으로 동작합니다.")}</p>
           <div className="head-scroll-guide">
-            <div className="head-scroll-visual" aria-hidden="true"><span>↑</span><span className="head-scroll-face">●</span><span>↓</span></div>
+            <div className="head-scroll-visual" aria-hidden="true"><span className="head-scroll-up">↑</span><span className="head-scroll-face">●</span><span className="head-scroll-down">↓</span></div>
             <ol className="head-scroll-steps">
               <li><strong>{t("정면 보기")}</strong><span>{t("중립 위치를 맞춰요")}</span></li>
               <li><strong>{t("고개 들기 / 숙이기")}</strong><span>{t("악보가 위 / 아래로 움직여요")}</span></li>
               <li><strong>{t("정면으로 돌아오기")}</strong><span>{t("스크롤이 멈춰요")}</span></li>
             </ol>
           </div>
-          <p className="guide-tip"><strong>{t("100%에서는 동작하지 않아요.")}</strong> {t("125% 이상 확대했을 때만 고개 스크롤이 켜집니다.")}</p>
+          <p className="guide-tip"><strong>{t("스크롤할 공간이 있을 때만 동작해요.")}</strong> {t("가로 화면은 100%에서도, 세로로 긴 악보는 고개로 이동할 수 있습니다.")}</p>
         </> : <>
         <h3 className="guide-action-title">{practiceTarget === "right" ? t("입을 벌린 채 잠깐 유지하세요") : t("짧게 벌렸다 닫고, 한 번 더")}</h3>
         <p id="practice-description">{practiceTarget === "right"

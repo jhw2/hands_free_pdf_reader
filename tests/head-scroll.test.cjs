@@ -16,16 +16,16 @@ function visit(node) {
 }
 visit(source);
 
-function landmarks(ratio) {
+function landmarks(pitchRatio) {
   const points = Array.from({ length: 153 }, () => ({ x: 0, y: 0 }));
   points[10] = { x: 0, y: 0 };
   points[152] = { x: 0, y: 1 };
-  points[1] = { x: 0, y: ratio };
+  points[1] = { x: 0, y: pitchRatio };
   return points;
 }
 
-function detector(zoom = 1.5) {
-  const viewer = { scrollTop: 0 };
+function detector(zoom = 1.5, scrollable = true) {
+  const viewer = { scrollTop: 0, scrollLeft: 0, scrollHeight: scrollable ? 1000 : 500, clientHeight: 500 };
   const activeStates = [];
   const env = {
     pdfZoomRef: { current: zoom }, practiceRef: { current: { open: false } }, pdfViewerRef: { current: viewer },
@@ -37,14 +37,22 @@ function detector(zoom = 1.5) {
     const js = ts.transpileModule(`const run = ${functions.get(name)};`, { compilerOptions: { target: ts.ScriptTarget.ES2020 } }).outputText;
     env[name] = new Function(...Object.keys(env), `${js}\nreturn run;`)(...Object.values(env));
   }
-  return { env, viewer, activeStates, sample: (time, ratio) => env.updateHeadScroll(landmarks(ratio), time) };
+  return { env, viewer, activeStates, sample: (time, pitch) => env.updateHeadScroll(landmarks(pitch), time) };
 }
 
 test('head movement does nothing at the default PDF size', () => {
-  const d = detector(1);
+  const d = detector(1, false);
   d.sample(0, 0.5);
   d.sample(500, 0.6);
   assert.equal(d.viewer.scrollTop, 0);
+});
+
+test('a width-fit landscape score scrolls by head movement at 100%', () => {
+  const d = detector(1, true);
+  d.sample(0, 0.5);
+  d.sample(100, 0.55);
+  d.sample(400, 0.55);
+  assert.ok(d.viewer.scrollTop > 0);
 });
 
 test('holding the head down scrolls only after the hold threshold', () => {

@@ -43,10 +43,12 @@ button:focus-visible, .file-label:focus-within { outline: 3px solid #89bdff; out
 .head-scroll-hint { color: #9fb0c6; font-size: .75rem; white-space: nowrap; }
 .head-scroll-hint.is-active { color: #83dfbc; }
 .pdf-viewer { position: relative; display: flex; align-items: center; justify-content: center; background: #080e17; border-radius: 12px; overflow: hidden; min-height: 380px; touch-action: pan-y; user-select: none; }
+.pdf-canvas-stage { display: grid; place-items: center; min-width: 100%; min-height: 100%; }
+.pdf-canvas-stage[hidden] { display: none; }
 .pdf-viewer canvas { display: block; max-width: 100%; max-height: 75dvh; width: auto; height: auto; object-fit: contain; }
-.pdf-viewer.is-zoomed { align-items: flex-start; justify-content: flex-start; overflow: auto; touch-action: pan-x pan-y; }
-.pdf-viewer.is-zoomed canvas { max-width: none; max-height: none; margin-inline: auto; }
-.pdf-viewer canvas[hidden] { display: none; }
+.pdf-viewer.is-zoomed { align-items: flex-start; justify-content: center; overflow-x: hidden; overflow-y: auto; touch-action: pan-y; }
+.pdf-viewer.is-zoomed .pdf-canvas-stage { width: 100%; min-width: 100%; min-height: 100%; place-items: start center; }
+.pdf-viewer.is-zoomed canvas { max-width: 100%; max-height: none; }
 .empty-viewer { width: 100%; padding: 56px 20px; text-align: center; }
 .empty-viewer-content { display: flex; flex-direction: column; gap: 20px; align-items: center; }
 .empty-eyebrow { font-size: .7rem; letter-spacing: .16em; color: #89b8f3; }
@@ -80,8 +82,8 @@ button:focus-visible, .file-label:focus-within { outline: 3px solid #89bdff; out
 .is-focus-mode .viewer-card { height: 100%; min-height: 0; padding: 0; border: 0; border-radius: 0; gap: 0; grid-template-rows: calc(24px + env(safe-area-inset-top, 0px)) minmax(0, 1fr); }
 .is-focus-mode .pdf-viewer { grid-row: 2; border-radius: 0; height: 100%; min-height: 0; }
 .is-focus-mode .pdf-viewer canvas { width: 100%; height: 100%; max-height: 100%; object-fit: contain; }
-.is-focus-mode .pdf-viewer.is-zoomed { align-items: flex-start; justify-content: flex-start; overflow: auto; }
-.is-focus-mode .pdf-viewer.is-zoomed canvas { width: auto; height: auto; max-width: none; max-height: none; }
+.is-focus-mode .pdf-viewer.is-zoomed { align-items: flex-start; justify-content: center; overflow-x: hidden; overflow-y: auto; }
+.is-focus-mode .pdf-viewer.is-zoomed canvas { width: auto; height: auto; max-width: 100%; max-height: none; }
 .is-focus-mode .viewer-toolbar, .is-focus-mode .reader-footer { display: none; }
 .focus-feedback-slot { grid-row: 1; min-width: 0; padding: env(safe-area-inset-top, 0px) 8px 0; display: flex; align-items: center; justify-content: center; background: #080e17; }
 .focus-detection-feedback { min-width: 0; max-width: 100%; pointer-events: none; }
@@ -122,6 +124,11 @@ button:focus-visible, .file-label:focus-within { outline: 3px solid #89bdff; out
   .reader-footer { gap: 12px; }
   .is-focus-mode { padding: 0; gap: 0; }
   .is-focus-mode .viewer-card { padding: 0; }
+}
+@media (orientation: landscape) and (max-height: 900px) {
+  .is-focus-mode .pdf-viewer { align-items: flex-start; overflow-x: hidden; overflow-y: auto; touch-action: pan-y; }
+  .is-focus-mode .pdf-canvas-stage { width: 100%; min-width: 100%; min-height: 100%; place-items: start center; }
+  .is-focus-mode .pdf-viewer canvas { width: 100%; height: auto; max-width: 100%; max-height: none; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 
@@ -193,7 +200,10 @@ button:focus-visible, .file-label:focus-within { outline: 3px solid #89bdff; out
 .guide-action-title { margin: 24px 0 0; font-size: 1.1rem; line-height: 1.5; }
 .practice-dialog .guide-tip { padding: 12px; border-radius: 10px; background: #1c2a3c; color: #c5d9f3; font-size: .85rem; }
 .head-scroll-guide { display: grid; grid-template-columns: 110px 1fr; gap: 18px; align-items: center; margin: 24px 0 16px; padding: 20px; border-radius: 14px; background: #172336; }
-.head-scroll-visual { display: grid; justify-items: center; gap: 6px; color: #83dfbc; font-size: 1.6rem; }
+.head-scroll-visual { display: grid; grid-template-columns: 64px; grid-template-rows: 32px 76px 32px; place-items: center; color: #83dfbc; font-size: 1.4rem; }
+.head-scroll-up { grid-column: 1; }
+.head-scroll-face { grid-column: 1; grid-row: 2; }
+.head-scroll-down { grid-column: 1; grid-row: 3; }
 .head-scroll-face { width: 64px; height: 76px; display: grid; place-items: center; border: 3px solid #d8e8ff; border-radius: 45%; color: #d8e8ff; font-size: .75rem; animation: head-guide-motion 2.4s ease-in-out infinite; }
 .head-scroll-steps { display: grid; gap: 12px; margin: 0; padding-left: 20px; color: #d4e3f7; }
 .head-scroll-steps li { padding-left: 4px; }
