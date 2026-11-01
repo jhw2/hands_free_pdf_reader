@@ -26,7 +26,7 @@ function detector({ useSmoothing = false } = {}) {
   const state = { current: { phase: 'idle', startedAt: null, closedAt: null, stableFrames: 0 } };
   const smoothed = { current: null };
   const mouthHoldDurationRef = { current: 500 };
-  const onResults = new Function('mouthStateRef', 'mouthHoldDurationRef', 'smoothedMouthRef', 'performance', 'handleGesture', 'updateGestureText', 'computeMouthOpenRatio', 'getSmoothedMouthRatio', 'cancelled', 'updateDetectionFeedback', `${compiled}\nreturn onResults;`)(state, mouthHoldDurationRef, smoothed, { now: () => now }, direction => moves.push(direction), () => {}, ratio => ratio, useSmoothing ? smoothRatio : (_ref, ratio) => ratio, false, () => {});
+  const onResults = new Function('mouthStateRef', 'mouthHoldDurationRef', 'smoothedMouthRef', 'performance', 'handleGesture', 'updateGestureText', 'computeMouthOpenRatio', 'getSmoothedMouthRatio', 'cancelled', 'updateDetectionFeedback', 'updateHeadScroll', 'resetHeadScroll', `${compiled}\nreturn onResults;`)(state, mouthHoldDurationRef, smoothed, { now: () => now }, direction => moves.push(direction), () => {}, ratio => ratio, useSmoothing ? smoothRatio : (_ref, ratio) => ratio, false, () => {}, () => {}, () => {});
   return {
     moves, state, mouthHoldDurationRef,
     sample(time, ratio) { now = time; onResults({ multiFaceLandmarks: ratio === null ? [] : [ratio] }); },

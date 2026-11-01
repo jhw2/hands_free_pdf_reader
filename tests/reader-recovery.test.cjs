@@ -25,6 +25,7 @@ function storage(write = async () => {}) {
     currentPdfBlobRef: { current: 'pdf-data' }, currentFileNameRef: { current: 'score.pdf' },
     currentPageRef: { current: 1 }, currentSavedScoreIdRef: { current: 'a' },
     practiceRef: { current: { active: false } }, pdfDocRef: { current: {} }, pageCountRef: { current: 10 },
+    pdfViewerRef: { current: { scrollTo: () => {} } },
     SAVED_SCORES_KEY: 'scores', SESSION_STATE_KEY: 'session', writeReaderValue: write,
     setSavedScores: () => {}, setCurrentPage: () => {}, renderPage: async () => {},
     updateGestureText: () => {}, console: { error: () => {} },
@@ -93,6 +94,7 @@ function renderer(pdf) {
   const errors = [], shown = [];
   const env = {
     pdfDocRef: { current: pdf }, canvasRef: { current: { getContext: () => ({}) } },
+    pdfZoomRef: { current: 1 }, PDF_BASE_RENDER_SCALE: 1.4,
     pendingRenderRef: { current: null }, renderPromiseRef: { current: null },
     setRenderError: value => errors.push(value), setPageText: value => shown.push(value),
     console: { error: () => {} },
@@ -153,4 +155,16 @@ test('an unavailable canvas releases the worker for a later retry', async () => 
   h.env.canvasRef.current.getContext = () => ({});
   await h.render(pdf, 1, 5);
   assert.equal(h.errors.at(-1), null);
+});
+
+test('PDF pages render at the selected zoom level', async () => {
+  let scale = null;
+  const pdf = { getPage: async () => ({
+    getViewport: options => { scale = options.scale; return { width: 100, height: 200 }; },
+    render: () => ({ promise: Promise.resolve() }),
+  }) };
+  const h = renderer(pdf);
+  h.env.pdfZoomRef.current = 1.5;
+  await h.render(pdf, 1, 1);
+  assert.ok(Math.abs(scale - 2.1) < Number.EPSILON * 10);
 });

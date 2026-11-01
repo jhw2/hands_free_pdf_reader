@@ -34,10 +34,18 @@ button:focus-visible, .file-label:focus-within { outline: 3px solid #89bdff; out
 .viewer-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .viewer-heading { min-width: 0; flex: 1; }
 .viewer-heading h2 { font-size: .92rem; color: #b2bfd0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.viewer-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .page-buttons { flex-shrink: 0; }
 .page-buttons button { font-size: .85rem; }
+.zoom-controls { display: flex; align-items: center; border: 1px solid #344157; border-radius: 12px; overflow: hidden; }
+.zoom-controls button { min-width: 42px; min-height: 42px; padding: 6px 10px; border: 0; border-radius: 0; background: transparent; font-size: 1.1rem; }
+.zoom-controls span { min-width: 52px; text-align: center; color: #c9d5e5; font-size: .8rem; font-variant-numeric: tabular-nums; }
+.head-scroll-hint { color: #9fb0c6; font-size: .75rem; white-space: nowrap; }
+.head-scroll-hint.is-active { color: #83dfbc; }
 .pdf-viewer { position: relative; display: flex; align-items: center; justify-content: center; background: #080e17; border-radius: 12px; overflow: hidden; min-height: 380px; touch-action: pan-y; user-select: none; }
 .pdf-viewer canvas { display: block; max-width: 100%; max-height: 75dvh; width: auto; height: auto; object-fit: contain; }
+.pdf-viewer.is-zoomed { align-items: flex-start; justify-content: flex-start; overflow: auto; touch-action: pan-x pan-y; }
+.pdf-viewer.is-zoomed canvas { max-width: none; max-height: none; margin-inline: auto; }
 .pdf-viewer canvas[hidden] { display: none; }
 .empty-viewer { width: 100%; padding: 56px 20px; text-align: center; }
 .empty-viewer-content { display: flex; flex-direction: column; gap: 20px; align-items: center; }
@@ -72,6 +80,8 @@ button:focus-visible, .file-label:focus-within { outline: 3px solid #89bdff; out
 .is-focus-mode .viewer-card { height: 100%; min-height: 0; padding: 0; border: 0; border-radius: 0; gap: 0; grid-template-rows: calc(24px + env(safe-area-inset-top, 0px)) minmax(0, 1fr); }
 .is-focus-mode .pdf-viewer { grid-row: 2; border-radius: 0; height: 100%; min-height: 0; }
 .is-focus-mode .pdf-viewer canvas { width: 100%; height: 100%; max-height: 100%; object-fit: contain; }
+.is-focus-mode .pdf-viewer.is-zoomed { align-items: flex-start; justify-content: flex-start; overflow: auto; }
+.is-focus-mode .pdf-viewer.is-zoomed canvas { width: auto; height: auto; max-width: none; max-height: none; }
 .is-focus-mode .viewer-toolbar, .is-focus-mode .reader-footer { display: none; }
 .focus-feedback-slot { grid-row: 1; min-width: 0; padding: env(safe-area-inset-top, 0px) 8px 0; display: flex; align-items: center; justify-content: center; background: #080e17; }
 .focus-detection-feedback { min-width: 0; max-width: 100%; pointer-events: none; }
@@ -79,7 +89,12 @@ button:focus-visible, .file-label:focus-within { outline: 3px solid #89bdff; out
 .focus-detection-feedback .detection-feedback p { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; line-height: 18px; }
 .focus-detection-feedback .hold-progress { flex: 0 0 52px; width: 52px; height: 2px; margin: 0; }
 .focus-close-button { position: absolute; top: max(12px, env(safe-area-inset-top)); right: max(12px, env(safe-area-inset-right)); z-index: 9; width: 44px; height: 44px; min-height: 44px; padding: 0; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: #111a27; color: #fff; border: 1px solid #6b7d95; font-size: 30px; line-height: 1; box-shadow: 0 2px 8px #0006; opacity: 0; pointer-events: none; transition: opacity .15s; }
-.show-focus-controls .focus-close-button, .focus-close-button:focus-visible { opacity: 1; pointer-events: auto; }
+.focus-view-controls { position: absolute; top: max(8px, env(safe-area-inset-top)); left: 50%; z-index: 9; display: flex; align-items: center; gap: 6px; max-width: calc(100% - 120px); padding: 2px 6px 2px 2px; border: 1px solid #40516a99; border-radius: 12px; background: #111a27c7; box-shadow: 0 2px 8px #0006; opacity: 0; pointer-events: none; transform: translateX(-50%); transition: opacity .15s; }
+.focus-view-controls .zoom-controls { border: 0; }
+.focus-view-controls .zoom-controls button { min-width: 40px; min-height: 40px; padding: 4px 8px; }
+.focus-view-controls .zoom-controls span { min-width: 46px; }
+.focus-page-position { padding-left: 4px; color: #c9d5e5; font-size: .75rem; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.show-focus-controls .focus-close-button, .focus-close-button:focus-visible, .show-focus-controls .focus-view-controls, .focus-view-controls:focus-within { opacity: 1; pointer-events: auto; }
 @media (max-width: 640px) {
   .app-shell { padding: 12px; gap: 12px; }
   .brand-block h1 { font-size: 1rem; }
@@ -91,6 +106,15 @@ button:focus-visible, .file-label:focus-within { outline: 3px solid #89bdff; out
   .motion-bar-copy > span:last-child { display: none; }
   .motion-bar-copy strong { font-size: .85rem; }
   .viewer-card { padding: 10px; }
+  .viewer-toolbar { align-items: flex-start; }
+  .viewer-actions { gap: 6px; }
+  .head-scroll-hint { display: none; }
+  .focus-view-controls { top: max(6px, env(safe-area-inset-top)); left: 6px; max-width: calc(100% - 62px); transform: none; }
+  .focus-view-controls .zoom-controls button { min-width: 40px; min-height: 40px; }
+  .focus-close-button { top: max(8px, env(safe-area-inset-top)); right: 8px; }
+  .zoom-controls button { min-width: 38px; padding: 6px 8px; }
+  .zoom-controls span { min-width: 46px; }
+  .page-buttons button { padding: 10px; }
   .workspace-grid { min-height: 420px; }
   .pdf-viewer { min-height: 300px; }
   .empty-viewer { padding: 40px 12px; }
@@ -154,6 +178,7 @@ button:focus-visible, .file-label:focus-within { outline: 3px solid #89bdff; out
 
 .guide-directions { display: flex; gap: 8px; padding: 4px; border-radius: 14px; background: #080e17; }
 .guide-directions button { flex: 1; }
+.guide-directions button { padding-inline: 10px; font-size: .85rem; }
 .guide-directions button[aria-pressed="true"] { background: #d8e8ff; color: #10203a; border-color: #d8e8ff; }
 .demo-mouth.is-next { animation-name: practice-next-mouth; animation-timing-function: linear; animation-delay: .3s; }
 @keyframes practice-next-mouth { 0%, 49.99% { transform: scaleY(1); } 50%, 100% { transform: scaleY(.12); } }
@@ -167,6 +192,16 @@ button:focus-visible, .file-label:focus-within { outline: 3px solid #89bdff; out
 
 .guide-action-title { margin: 24px 0 0; font-size: 1.1rem; line-height: 1.5; }
 .practice-dialog .guide-tip { padding: 12px; border-radius: 10px; background: #1c2a3c; color: #c5d9f3; font-size: .85rem; }
+.head-scroll-guide { display: grid; grid-template-columns: 110px 1fr; gap: 18px; align-items: center; margin: 24px 0 16px; padding: 20px; border-radius: 14px; background: #172336; }
+.head-scroll-visual { display: grid; justify-items: center; gap: 6px; color: #83dfbc; font-size: 1.6rem; }
+.head-scroll-face { width: 64px; height: 76px; display: grid; place-items: center; border: 3px solid #d8e8ff; border-radius: 45%; color: #d8e8ff; font-size: .75rem; animation: head-guide-motion 2.4s ease-in-out infinite; }
+.head-scroll-steps { display: grid; gap: 12px; margin: 0; padding-left: 20px; color: #d4e3f7; }
+.head-scroll-steps li { padding-left: 4px; }
+.head-scroll-steps strong, .head-scroll-steps span { display: block; }
+.head-scroll-steps span { margin-top: 2px; color: #9fb0c6; font-size: .8rem; line-height: 1.4; }
+@keyframes head-guide-motion { 0%, 20%, 80%, 100% { transform: translateY(0); } 40% { transform: translateY(-8px); } 60% { transform: translateY(8px); } }
+@media (prefers-reduced-motion: reduce) { .head-scroll-face { animation: none; } }
+@media (max-width: 480px) { .guide-directions { flex-wrap: wrap; } .guide-directions button { min-width: 30%; } .head-scroll-guide { grid-template-columns: 1fr; } }
 .guide-try { margin-top: 24px; padding-top: 20px; border-top: 1px solid #344157; }
 .guide-try h3 { margin: 0; font-size: 1rem; line-height: 1.5; }
 .guide-try > p { margin-top: 8px; color: #bfcee2; font-size: .85rem; line-height: 1.6; }

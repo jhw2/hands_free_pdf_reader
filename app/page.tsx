@@ -21,6 +21,12 @@ const MOUTH_HOLD_DURATION_MS = 500;
 const MOUTH_MIN_OPEN_MS = 40;
 const MOUTH_DOUBLE_TAP_WINDOW_MS = 600;
 const MOUTH_STABLE_FRAME_TARGET = 2;
+const PDF_BASE_RENDER_SCALE = 1.4;
+const PDF_ZOOM_LEVELS = [1, 1.25, 1.5, 1.75, 2];
+const HEAD_TILT_THRESHOLD = 0.035;
+const HEAD_TILT_HOLD_MS = 250;
+const HEAD_SCROLL_SPEED_PX_PER_SECOND = 260;
+const HEAD_NEUTRAL_SMOOTHING_ALPHA = 0.04;
 
 type SavedScore = {
   id: string;
@@ -116,11 +122,13 @@ export default function Home() {
   const practiceRef = useRef<{ open: boolean; active: boolean; result: PracticeResult; phase: MouthPhase | null; target: "left" | "right" }>({ open: false, active: false, result: "listening", phase: null, target: "right" });
   const [isPracticeActive, setIsPracticeActive] = useState(false);
   const [practiceTarget, setPracticeTarget] = useState<"left" | "right">("right");
+  const [guideTopic, setGuideTopic] = useState<"left" | "right" | "scroll">("right");
   const [practiceResult, setPracticeResult] = useState<PracticeResult>("listening");
   const [practicePhase, setPracticePhase] = useState<MouthPhase | null>(null);
   const [demoKey, setDemoKey] = useState(0);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const pdfViewerRef = useRef<HTMLDivElement>(null);
   const [pageText, setPageText] = useState("페이지: 0 / 0");
   const [gestureText, setGestureText] = useState("카메라를 준비하고 있어요");
   const [pdfDoc, setPdfDoc] = useState<any>(null);
@@ -135,6 +143,8 @@ export default function Home() {
   const [isLibraryOpen, setIsLibraryOpen] = useState(false);
   const [isFocusMode, setIsFocusMode] = useState(false);
   const [isFocusControlsVisible, setIsFocusControlsVisible] = useState(false);
+  const [pdfZoom, setPdfZoom] = useState(1);
+  const [headScrollDirection, setHeadScrollDirection] = useState<"up" | "down" | null>(null);
   const [cameraEnabled, setCameraEnabled] = useState(true);
   const [mouthHoldDurationMs, setMouthHoldDurationMs] = useState(MOUTH_HOLD_DURATION_MS);
   const [detectionStatus, setDetectionStatus] = useState("카메라를 준비하고 있어요");
@@ -167,6 +177,11 @@ export default function Home() {
   const gestureFeedbackTimeoutRef = useRef<number | null>(null);
   const touchStartRef = useRef<{ pointerId: number; x: number; y: number } | null>(null);
   const focusControlsTimeoutRef = useRef<number | null>(null);
+  const pdfZoomRef = useRef(1);
+  const headNeutralRef = useRef<number | null>(null);
+  const headTiltStartedAtRef = useRef<number | null>(null);
+  const headScrollLastFrameRef = useRef<number | null>(null);
+  const headScrollDirectionRef = useRef<"up" | "down" | null>(null);
 
   const loadPdfJs = async () => {
     if (window.pdfjsLib) {
@@ -246,6 +261,10 @@ export default function Home() {
     initialPage?: number;
     savedScoreId?: string | null;
   }) => {
+    pdfZoomRef.current = 1;
+    setPdfZoom(1);
+    resetHeadScroll();
+    pdfViewerRef.current?.scrollTo({ top: 0, left: 0 });
     await loadPdfJs();
     if (!window.pdfjsLib) {
       throw new Error("PDF 스크립트가 아직 준비되지 않았습니다.");
@@ -449,10 +468,12 @@ export default function Home() {
           if (!results.multiFaceLandmarks?.length) {
             smoothedMouthRef.current = null;
             mouthStateRef.current = { phase: "idle", startedAt: null, closedAt: null, stableFrames: 0 };
+            resetHeadScroll();
             updateDetectionFeedback(null);
             return;
           }
           const landmarks = results.multiFaceLandmarks[0];
+          updateHeadScroll(landmarks, performance.now());
 
           {
             const rawMouth = computeMouthOpenRatio(landmarks);
@@ -591,7 +612,7 @@ export default function Home() {
             try {
               const page = await request.pdf.getPage(request.pageNumber);
               if (request.pdf !== pdfDocRef.current || !canvasRef.current) continue;
-              const viewport = page.getViewport({ scale: 1.4 });
+              const viewport = page.getViewport({ scale: PDF_BASE_RENDER_SCALE * pdfZoomRef.current });
               const canvas = canvasRef.current;
               const ctx = canvas.getContext("2d");
               if (!ctx) throw new Error("Canvas context unavailable");
@@ -631,6 +652,7 @@ export default function Home() {
 
     currentPageRef.current = safePage;
     setCurrentPage(safePage);
+    pdfViewerRef.current?.scrollTo({ top: 0, left: 0 });
     void renderPage(pdf, safePage, totalPages);
     void saveSessionState({ currentPage: safePage });
 
@@ -642,9 +664,23 @@ export default function Home() {
     }
   };
 
+  const changePdfZoom = (step: number) => {
+    const currentIndex = PDF_ZOOM_LEVELS.indexOf(pdfZoomRef.current);
+    const nextIndex = Math.max(0, Math.min(PDF_ZOOM_LEVELS.length - 1, currentIndex + step));
+    const nextZoom = PDF_ZOOM_LEVELS[nextIndex];
+    if (nextZoom === pdfZoomRef.current) return;
+
+    pdfZoomRef.current = nextZoom;
+    setPdfZoom(nextZoom);
+    resetHeadScroll();
+    if (pdfDocRef.current) {
+      void renderPage(pdfDocRef.current, currentPageRef.current, pageCountRef.current);
+    }
+  };
+
   const handlePageSwipeStart = (event: React.PointerEvent<HTMLDivElement>) => {
     touchStartRef.current = null;
-    if (pageCountRef.current === 0 || practiceRef.current.open) return;
+    if (pageCountRef.current === 0 || practiceRef.current.open || pdfZoomRef.current > 1) return;
     // Capturing a label's pointer redirects its click to the viewer, preventing
     // the browser from opening the associated file input.
     if (event.target instanceof Element && event.target.closest("button, input, label, a, select, textarea, [role='button']")) return;
@@ -786,11 +822,7 @@ export default function Home() {
       : "준비됐어요 · 입을 벌리면 다음 페이지");
   };
 
-  const revealFocusControls = () => {
-    if (!isFocusMode) {
-      return;
-    }
-
+  const showFocusControls = () => {
     setIsFocusControlsVisible(true);
 
     if (focusControlsTimeoutRef.current !== null) {
@@ -801,6 +833,19 @@ export default function Home() {
       setIsFocusControlsVisible(false);
       focusControlsTimeoutRef.current = null;
     }, 2200);
+  };
+
+  const revealFocusControls = () => {
+    if (isFocusMode) showFocusControls();
+  };
+
+  const toggleFocusMode = () => {
+    if (isFocusMode) {
+      setIsFocusMode(false);
+      return;
+    }
+    setIsFocusMode(true);
+    showFocusControls();
   };
 
   const handleGesture = (direction: "left" | "right") => {
@@ -860,6 +905,68 @@ export default function Home() {
     return Math.hypot(upper.x - lower.x, upper.y - lower.y) / width;
   };
 
+  const computeHeadPitchRatio = (landmarks: NormalizedLandmark[]) => {
+    const forehead = landmarks[10];
+    const chin = landmarks[152];
+    const nose = landmarks[1];
+    const faceX = chin.x - forehead.x;
+    const faceY = chin.y - forehead.y;
+    const faceLengthSquared = faceX * faceX + faceY * faceY;
+    if (faceLengthSquared === 0) return 0;
+    return ((nose.x - forehead.x) * faceX + (nose.y - forehead.y) * faceY) / faceLengthSquared;
+  };
+
+  const resetHeadScroll = () => {
+    headNeutralRef.current = null;
+    headTiltStartedAtRef.current = null;
+    headScrollLastFrameRef.current = null;
+    if (headScrollDirectionRef.current) {
+      headScrollDirectionRef.current = null;
+      setHeadScrollDirection(null);
+    }
+  };
+
+  const updateHeadScroll = (landmarks: NormalizedLandmark[], now: number) => {
+    if (pdfZoomRef.current <= 1 || practiceRef.current.open || !pdfViewerRef.current) {
+      resetHeadScroll();
+      return;
+    }
+
+    const pitchRatio = computeHeadPitchRatio(landmarks);
+    if (headNeutralRef.current === null) {
+      headNeutralRef.current = pitchRatio;
+      return;
+    }
+
+    const downwardMovement = pitchRatio - headNeutralRef.current;
+    if (Math.abs(downwardMovement) >= HEAD_TILT_THRESHOLD) {
+      const direction = downwardMovement > 0 ? "down" : "up";
+      if (headScrollDirectionRef.current !== direction) {
+        headScrollDirectionRef.current = direction;
+        headTiltStartedAtRef.current = now;
+        headScrollLastFrameRef.current = null;
+      }
+      if (now - (headTiltStartedAtRef.current ?? now) >= HEAD_TILT_HOLD_MS) {
+        const elapsed = Math.min(50, now - (headScrollLastFrameRef.current ?? now - 16));
+        const distance = HEAD_SCROLL_SPEED_PX_PER_SECOND * elapsed / 1000;
+        pdfViewerRef.current.scrollTop += direction === "down" ? distance : -distance;
+        headScrollLastFrameRef.current = now;
+        setHeadScrollDirection(direction);
+      }
+      return;
+    }
+
+    headTiltStartedAtRef.current = null;
+    headScrollLastFrameRef.current = null;
+    if (headScrollDirectionRef.current) {
+      headScrollDirectionRef.current = null;
+      setHeadScrollDirection(null);
+    }
+    if (Math.abs(downwardMovement) < HEAD_TILT_THRESHOLD / 2) {
+      headNeutralRef.current += downwardMovement * HEAD_NEUTRAL_SMOOTHING_ALPHA;
+    }
+  };
+
   const getSmoothedMouthRatio = (targetRef: React.MutableRefObject<number | null>, nextValue: number) => {
     if (targetRef.current === null) {
       targetRef.current = nextValue;
@@ -888,12 +995,25 @@ export default function Home() {
     practiceRef.current = { open: true, active: false, result: "listening", phase: null, target };
     setIsPracticeActive(false);
     setPracticeTarget(target);
+    setGuideTopic(target);
     setPracticeResult("listening");
     setPracticePhase(null);
     setMouthProgress(0);
     mouthStateRef.current = { phase: "waiting-close", startedAt: null, closedAt: null, stableFrames: 0 };
     smoothedMouthRef.current = null;
     setDemoKey((key) => key + 1);
+  };
+
+  const selectScrollGuide = () => {
+    practiceRef.current.open = true;
+    practiceRef.current.active = false;
+    setIsPracticeActive(false);
+    setGuideTopic("scroll");
+    setPracticeResult("listening");
+    setPracticePhase(null);
+    setMouthProgress(0);
+    mouthStateRef.current = { phase: "waiting-close", startedAt: null, closedAt: null, stableFrames: 0 };
+    smoothedMouthRef.current = null;
   };
 
   const openUsageGuide = () => {
@@ -929,6 +1049,7 @@ export default function Home() {
   const canGoPrevious = currentPage > 1;
   const canGoNext = pageCount > 0 && currentPage < pageCount;
   const hasLoadedPdf = pdfDoc !== null;
+  const hasSavedScores = savedScores.length > 0;
   const cameraPermissionOn = cameraPermission === "granted";
   const isCameraReady = cameraEnabled && cameraPermissionOn;
   const cameraButtonText = cameraEnabled ? "잠시 멈추기"
@@ -959,6 +1080,18 @@ export default function Home() {
     </div>
   );
 
+  const renderZoomControls = () => (
+    <div className="zoom-controls" role="group" aria-label={t("악보 확대 및 축소")}>
+      <button type="button" onClick={() => changePdfZoom(-1)} disabled={pdfZoom === PDF_ZOOM_LEVELS[0]} aria-label={t("축소")}>−</button>
+      <span aria-live="polite">{Math.round(pdfZoom * 100)}%</span>
+      <button type="button" onClick={() => changePdfZoom(1)} disabled={pdfZoom === PDF_ZOOM_LEVELS.at(-1)} aria-label={t("확대")}>+</button>
+    </div>
+  );
+
+  const headScrollStatus = pdfZoom > 1
+    ? t(headScrollDirection === "down" ? "아래로 스크롤 중" : headScrollDirection === "up" ? "위로 스크롤 중" : "고개를 위아래로 움직여 스크롤")
+    : null;
+
   return (
     <main className={`app-shell ${isFocusMode ? "is-focus-mode" : ""} ${isFocusControlsVisible ? "show-focus-controls" : ""}`}>
       <header className="topbar">
@@ -973,7 +1106,7 @@ export default function Home() {
           </label>
           <button type="button" className="usage-guide-button" onClick={openUsageGuide} aria-haspopup="dialog">{t("사용법")}</button>
           {hasLoadedPdf ? uploadAction(t("악보 변경")) : null}
-          <button type="button" className="secondary-button" onClick={() => setIsLibraryOpen((prev) => !prev)} aria-expanded={isLibraryOpen} aria-controls="saved-library">{t("최근 악보")}</button>
+          {hasSavedScores ? <button type="button" className="secondary-button" onClick={() => setIsLibraryOpen((prev) => !prev)} aria-expanded={isLibraryOpen} aria-controls="saved-library">{t("최근 악보")}</button> : null}
         </div>
       </header>
 
@@ -984,30 +1117,36 @@ export default function Home() {
         <button type="button" className="camera-toggle" onClick={handleCameraAction} aria-pressed={cameraEnabled}>{t(cameraButtonText)}</button>
       </section>
 
-      {isLibraryOpen ? (
+      {isLibraryOpen && hasSavedScores ? (
         <section className="saved-library" id="saved-library" aria-label={t("최근 악보")}>
           <h2>{t("최근 악보")}</h2>
-          {savedScores.length === 0 ? <p className="library-empty">{t("악보를 열면 여기에 자동으로 저장돼요.")}</p> : (
-            <ul className="saved-score-list">{savedScores.map((score) => (
+          <ul className="saved-score-list">{savedScores.map((score) => (
               <li key={score.id} className="saved-score-item">
                 <button type="button" className="saved-score-open" onClick={() => { setIsLibraryOpen(false); void openSavedScore(score); }}><strong>{score.name}</strong><span>{t("{page}페이지부터 이어보기", { page: score.currentPage })}</span></button>
                 <button type="button" className="saved-score-delete" aria-label={t("{name} 삭제", { name: score.name })} onClick={() => void deleteSavedScore(score.id)}>{t("삭제")}</button>
               </li>
             ))}</ul>
-          )}
         </section>
       ) : null}
 
       <section className="workspace-grid">
         <div className="viewer-card" onMouseMove={isFocusMode ? revealFocusControls : undefined} onTouchStart={isFocusMode ? revealFocusControls : undefined}>
-          {isFocusMode ? <button type="button" className="focus-close-button" onClick={() => setIsFocusMode(false)} aria-label={t("전체 보기 닫기")} title={t("전체 보기 닫기 (Esc)")}><span aria-hidden="true">×</span></button> : null}
+          {isFocusMode ? <button type="button" className="focus-close-button" onClick={toggleFocusMode} aria-label={t("전체 보기 닫기")} title={t("전체 보기 닫기 (Esc)")}><span aria-hidden="true">×</span></button> : null}
+          {isFocusMode && hasLoadedPdf ? <div className="focus-view-controls">
+            {renderZoomControls()}
+            <span className="focus-page-position" aria-label={t("현재 페이지 {page} / {total}", { page: currentPage, total: pageCount })}>{currentPage} / {pageCount}</span>
+          </div> : null}
           {isFocusMode ? <div className="focus-feedback-slot">{cameraEnabled && !cameraError && isGestureActive ? <div className="focus-detection-feedback">{detectionFeedback}</div> : null}</div> : null}
           <div className="viewer-toolbar">
             <div className="viewer-heading"><h2>{hasLoadedPdf ? viewerTitle : t("악보를 열고 바로 시작하세요")}</h2></div>
             {gestureOverlayText && !isFocusMode ? <span className="gesture-notice" role="status">{t(gestureOverlayText)}</span> : null}
-            {hasLoadedPdf ? <div className="page-buttons"><button type="button" onClick={() => setIsFocusMode((prev) => !prev)}>{isFocusMode ? t("전체 보기 종료") : t("전체 보기")}</button></div> : null}
+            {hasLoadedPdf ? <div className="viewer-actions">
+              {renderZoomControls()}
+              {headScrollStatus ? <span className={`head-scroll-hint ${headScrollDirection ? "is-active" : ""}`} role="status">{headScrollStatus}</span> : null}
+              <div className="page-buttons"><button type="button" onClick={toggleFocusMode}>{t("전체 보기")}</button></div>
+            </div> : null}
           </div>
-          <div className="pdf-viewer" onPointerDown={handlePageSwipeStart} onPointerUp={handlePageSwipeEnd} onPointerCancel={() => { touchStartRef.current = null; }}>
+          <div ref={pdfViewerRef} className={`pdf-viewer ${pdfZoom > 1 ? "is-zoomed" : ""}`} onPointerDown={handlePageSwipeStart} onPointerUp={handlePageSwipeEnd} onPointerCancel={() => { touchStartRef.current = null; }}>
             <canvas ref={canvasRef} hidden={!hasLoadedPdf} />
             {renderError ? <div className="render-error" role="alert" onPointerDown={(event) => event.stopPropagation()}><p>{t(renderError)}</p><button type="button" onClick={() => void renderPage(pdfDocRef.current, currentPageRef.current, pageCountRef.current)}>{t("다시 시도")}</button></div> : null}
             {!hasLoadedPdf ? <div className="empty-viewer">
@@ -1024,9 +1163,23 @@ export default function Home() {
       <dialog ref={practiceDialogRef} className="practice-dialog" aria-labelledby="practice-title" aria-describedby="practice-description" onClose={closePractice}>
         <div className="practice-heading"><h2 id="practice-title">{t("사용법")}</h2><button type="button" onClick={closePractice} aria-label={t("사용법 닫기")} autoFocus>×</button></div>
         <div className="guide-directions" role="group" aria-label={t("배울 동작 선택")}>
-          <button type="button" aria-pressed={practiceTarget === "right"} onClick={() => selectPracticeTarget("right")}>{t("다음 페이지 →")}</button>
-          <button type="button" aria-pressed={practiceTarget === "left"} onClick={() => selectPracticeTarget("left")}>{t("← 이전 페이지")}</button>
+          <button type="button" aria-pressed={guideTopic === "right"} onClick={() => selectPracticeTarget("right")}>{t("다음 페이지 →")}</button>
+          <button type="button" aria-pressed={guideTopic === "left"} onClick={() => selectPracticeTarget("left")}>{t("← 이전 페이지")}</button>
+          <button type="button" aria-pressed={guideTopic === "scroll"} onClick={selectScrollGuide}>{t("확대 스크롤")}</button>
         </div>
+        {guideTopic === "scroll" ? <>
+          <h3 className="guide-action-title">{t("확대한 악보는 고개로 위아래 이동하세요")}</h3>
+          <p id="practice-description">{t("먼저 전체 보기에서 악보를 확대하고 정면을 바라보세요.")}<br /><strong>{t("고개는 스크롤, 입은 페이지 이동")}</strong>{t("으로 동작합니다.")}</p>
+          <div className="head-scroll-guide">
+            <div className="head-scroll-visual" aria-hidden="true"><span>↑</span><span className="head-scroll-face">●</span><span>↓</span></div>
+            <ol className="head-scroll-steps">
+              <li><strong>{t("정면 보기")}</strong><span>{t("중립 위치를 맞춰요")}</span></li>
+              <li><strong>{t("고개 들기 / 숙이기")}</strong><span>{t("악보가 위 / 아래로 움직여요")}</span></li>
+              <li><strong>{t("정면으로 돌아오기")}</strong><span>{t("스크롤이 멈춰요")}</span></li>
+            </ol>
+          </div>
+          <p className="guide-tip"><strong>{t("100%에서는 동작하지 않아요.")}</strong> {t("125% 이상 확대했을 때만 고개 스크롤이 켜집니다.")}</p>
+        </> : <>
         <h3 className="guide-action-title">{practiceTarget === "right" ? t("입을 벌린 채 잠깐 유지하세요") : t("짧게 벌렸다 닫고, 한 번 더")}</h3>
         <p id="practice-description">{practiceTarget === "right"
           ? <><strong>{t("{seconds}초 유지", { seconds: (mouthHoldDurationMs / 1000).toFixed(1) })}</strong>{t("하면 다음 페이지로 넘어가요.")}<br />{t("넘어간 뒤에는 입을 닫아주세요.")}</>
@@ -1105,6 +1258,7 @@ export default function Home() {
           </div>
           <p className="practice-note">{t("연습 중에는 실제 악보가 넘어가지 않아요.")}</p>
         </section>}
+        </>}
       </dialog>
       <p className="sr-only" role="status">{t(gestureText)}</p>
       <video ref={videoRef} autoPlay muted playsInline className="camera-feed-hidden" />

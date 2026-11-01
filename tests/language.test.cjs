@@ -57,6 +57,7 @@ test('the complete initial UI and usage dialog render in English', () => {
   assert.ok(html.includes('Hold for 0.5 s'));
   assert.ok(html.includes('Try it yourself'));
   assert.ok(html.includes('Your score stays on the same page during practice.'));
+  assert.ok(!html.includes('Recent scores'));
   assert.doesNotMatch(html.replaceAll('한국어', ''), /[가-힣]/);
 });
 

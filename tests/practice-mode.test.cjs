@@ -129,7 +129,7 @@ test('opening and switching instructions stays in reading mode until explicit pr
   let active = false, opened = false;
   const env = {
     practiceRef, mouthStateRef: { current: null }, smoothedMouthRef: { current: 0.5 },
-    setIsPracticeActive: value => { active = value; }, setPracticeTarget: () => {},
+    setIsPracticeActive: value => { active = value; }, setPracticeTarget: () => {}, setGuideTopic: () => {},
     setPracticeResult: () => {}, setPracticePhase: () => {}, setMouthProgress: () => {}, setDemoKey: () => {},
     setIsFocusMode: () => {}, practiceDialogRef: { current: { showModal: () => { opened = true; } } },
   };

@@ -13,11 +13,11 @@ class Target {
   constructor(interactive = false) { this.interactive = interactive; }
   closest() { return this.interactive ? this : null; }
 }
-function viewer({ pages = 5, guideOpen = false } = {}) {
+function viewer({ pages = 5, guideOpen = false, zoom = 1 } = {}) {
   const captured = new Set(), moved = [];
   const bindings = {
     Element: Target, touchStartRef: { current: null }, pageCountRef: { current: pages },
-    practiceRef: { current: { open: guideOpen } }, currentPageRef: { current: 2 },
+    practiceRef: { current: { open: guideOpen } }, currentPageRef: { current: 2 }, pdfZoomRef: { current: zoom },
     TOUCH_SWIPE_MIN_DISTANCE_PX: 50, queuePage: page => moved.push(page), showTemporaryGestureText: () => {},
   };
   function actual(name) {
@@ -72,4 +72,12 @@ test('opening the guide prevents the swipe handler from capturing a pointer', ()
   const h = viewer({ guideOpen: true });
   h.start(h.event());
   assert.equal(h.captured.size, 0);
+});
+
+test('dragging an enlarged PDF pans instead of turning the page', () => {
+  const h = viewer({ zoom: 1.5 });
+  h.start(h.event({ pointerType: 'touch' }));
+  h.end(h.event({ pointerType: 'touch', clientX: 100 }));
+  assert.equal(h.captured.size, 0);
+  assert.deepEqual(h.moved, []);
 });
