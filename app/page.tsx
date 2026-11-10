@@ -189,7 +189,7 @@ export default function Home() {
       return window.pdfjsLib;
     }
 
-    const pdfjsLib = await import("pdfjs-dist/build/pdf.mjs");
+    const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs");
     window.pdfjsLib = pdfjsLib;
     pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
     return pdfjsLib;

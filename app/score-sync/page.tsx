@@ -786,7 +786,7 @@ export default function ScoreSyncPage() {
     setLoading(true); setError(""); setPages([]); setMeasures([]); setFileName(nextFileName);
     if (shouldPersist) { setBpm(120); setBeatsPerMeasure(4); setTempoDetected(false); }
     try {
-      const pdfjs = await import("pdfjs-dist/build/pdf.mjs");
+      const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
       pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
       const pdf = await pdfjs.getDocument({ data: await blob.arrayBuffer() }).promise;
       const nextPages: string[] = []; const nextMeasures: MeasureBox[] = []; const scoreText: string[] = [];
@@ -812,7 +812,7 @@ export default function ScoreSyncPage() {
         });
         const canvas = document.createElement("canvas"); canvas.width = viewport.width; canvas.height = viewport.height;
         const context = canvas.getContext("2d"); if (!context) continue;
-        await page.render({ canvasContext: context, viewport }).promise;
+        await page.render({ canvas, canvasContext: context, viewport }).promise;
         nextMeasures.push(...findMeasures(canvas, pageNumber, pageTextItems));
         nextPages.push(canvas.toDataURL("image/jpeg", .9));
       }
