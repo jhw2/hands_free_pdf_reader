@@ -3,6 +3,7 @@
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { PDFPageProxy } from "pdfjs-dist";
 import { compilePlaybackOrder, type NavigationMeasure } from "./navigation";
+import { readScoreGeometry, findVectorStaves, vectorBarsForStaff, type ScoreGeometry } from "./score-geometry";
 import styles from "./score-sync.module.css";
 
 type ScoreTextItem = { text: string; x: number; y: number; width: number; height: number; fontName: string };
@@ -255,7 +256,7 @@ const applyRepeatCountHints = (measures: MeasureBox[]) => {
   });
 };
 
-function findMeasures(canvas: HTMLCanvasElement, page: number, textItems: ScoreTextItem[]): MeasureBox[] {
+function findMeasures(canvas: HTMLCanvasElement, page: number, textItems: ScoreTextItem[], geometry?: ScoreGeometry): MeasureBox[] {
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
   if (!ctx) return [];
   const { width, height } = canvas;
@@ -265,7 +266,7 @@ function findMeasures(canvas: HTMLCanvasElement, page: number, textItems: ScoreT
     return data[i] + data[i + 1] + data[i + 2] < 590;
   };
 
-  // A real staff is identified only by five long, evenly-spaced horizontal lines.
+  // A real staff has five lines, or six for guitar TAB.
   // This deliberately excludes titles, lyrics and other dense text regions.
   const rowCandidates: number[] = [];
   for (let y = Math.floor(height * .04); y < height * .97; y++) {
@@ -286,14 +287,25 @@ function findMeasures(canvas: HTMLCanvasElement, page: number, textItems: ScoreT
     const gaps = lines.slice(1).map((line, index) => line - lines[index]);
     const spacing = gaps.reduce((sum, gap) => sum + gap, 0) / 4;
     const evenlySpaced = spacing >= 3 && spacing < height * .018 && gaps.every((gap) => Math.abs(gap - spacing) < Math.max(2.5, spacing * .28));
-    if (evenlySpaced) { staves.push({ lines, spacing }); i += 5; }
+    if (evenlySpaced) {
+      if (staffLines[i + 5] !== undefined && Math.abs(staffLines[i + 5] - lines[4] - spacing) < Math.max(2, spacing * .2)) lines.push(staffLines[i + 5]);
+      staves.push({ lines, spacing }); i += lines.length;
+    }
     else i++;
   }
 
+  const vectorStaves = geometry ? findVectorStaves(geometry, width) : [];
+  // Repeat dots are sampled from pixels, so keep measured row centers when available.
+  const allStaves = [...vectorStaves.map(vector => ({ ...vector,
+    lines: staves.find(staff => staff.lines.length === vector.lines.length && Math.abs(staff.lines[0] - vector.lines[0]) <= 2)?.lines
+      ?? vector.lines.map(Math.round),
+  })), ...staves.filter(staff => !vectorStaves.some(vector =>
+    Math.abs(vector.lines[0] - staff.lines[0]) <= Math.max(2, vector.spacing * .3)))].sort((a, b) => a.lines[0] - b.lines[0]);
+
   type DetectedStaff = { lines: number[]; coreTop: number; coreBottom: number; spacing: number; left: number; right: number; bars: number[]; rejectedBars: number[] };
-  const detectedStaves: DetectedStaff[] = staves.map(({ lines, spacing }) => {
+  const detectedStaves: DetectedStaff[] = allStaves.map(({ lines, spacing }) => {
     const coreTop = Math.max(0, Math.round(lines[0]));
-    const coreBottom = Math.min(height - 1, Math.round(lines[4]));
+    const coreBottom = Math.min(height - 1, Math.round(lines.at(-1)!));
     let staffLeft = width * .06;
     let staffRight = width * .94;
     const lineSpans = lines.map((line) => {
@@ -319,10 +331,19 @@ function findMeasures(canvas: HTMLCanvasElement, page: number, textItems: ScoreT
       staffRight = rights[Math.floor(rights.length / 2)];
     }
 
+    const vectorStaff = vectorStaves.find(staff => Math.abs(staff.lines[0] - coreTop) <= 2
+      && Math.abs(staff.lines.at(-1)! - coreBottom) <= 2);
+    const vectorBars = geometry && vectorStaff ? vectorBarsForStaff(geometry, vectorStaff, vectorStaves) : null;
+    if (vectorBars && vectorStaff) {
+      const bars = clusterBarColumns(vectorBars.filter(x => x > vectorStaff.left + spacing * 5
+        && x < vectorStaff.right - spacing), Math.max(5, spacing));
+      return { lines, coreTop, coreBottom, spacing, left: vectorStaff.left, right: vectorStaff.right, bars, rejectedBars: [] };
+    }
+
     const candidates: number[] = [];
     const barSearchStart = staffLeft + spacing * 5;
     for (let x = Math.ceil(barSearchStart); x <= staffRight - spacing; x++) {
-      const gapCoverages = lines.slice(0, 4).map((line, lineIndex) => {
+      const gapCoverages = lines.slice(0, -1).map((line, lineIndex) => {
         const gapPadding = Math.max(1, Math.round(spacing * .14));
         const startY = Math.ceil(line + gapPadding);
         const endY = Math.floor(lines[lineIndex + 1] - gapPadding);
@@ -382,6 +403,8 @@ function findMeasures(canvas: HTMLCanvasElement, page: number, textItems: ScoreT
   });
 
   const hasVerticalBridgeAt = (upper: DetectedStaff, lower: DetectedStaff, x: number) => {
+    if (geometry?.vertical.some(line => Math.abs(line.x - x) <= 1.5
+      && line.top <= upper.coreBottom + 1 && line.bottom >= lower.coreTop - 1)) return true;
     const gapTop = Math.ceil(upper.coreBottom);
     const gapBottom = Math.floor(lower.coreTop);
     const gapHeight = gapBottom - gapTop;
@@ -841,8 +864,9 @@ export default function ScoreSyncPage() {
         });
         const canvas = document.createElement("canvas"); canvas.width = viewport.width; canvas.height = viewport.height;
         const context = canvas.getContext("2d"); if (!context) continue;
+        const geometry = readScoreGeometry(await page.getOperatorList(), viewport.transform, pdfjs);
         await page.render({ canvas, canvasContext: context, viewport }).promise;
-        nextMeasures.push(...findMeasures(canvas, pageNumber, pageTextItems));
+        nextMeasures.push(...findMeasures(canvas, pageNumber, pageTextItems, geometry));
         nextPages.push(canvas.toDataURL("image/jpeg", .9));
       }
       if (loadVersion !== pdfLoadVersionRef.current) return;
