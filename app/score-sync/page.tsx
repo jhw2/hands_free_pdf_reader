@@ -645,7 +645,6 @@ export default function ScoreSyncPage() {
   const lastRecoveryRef = useRef(0);
   const pollFailuresRef = useRef(0);
   const lastSelectedTargetRef = useRef(0);
-  const restoreStartedRef = useRef(false);
   const pdfLoadVersionRef = useRef(0);
 
   const navigation = useMemo(() => compilePlaybackOrder(measures), [measures]);
@@ -847,8 +846,6 @@ export default function ScoreSyncPage() {
   };
 
   useEffect(() => {
-    if (restoreStartedRef.current) return;
-    restoreStartedRef.current = true;
     const restoreVersion = ++pdfLoadVersionRef.current;
     const restore = async () => {
       const metadata = readStoredMetadata();
