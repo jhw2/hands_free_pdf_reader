@@ -28,9 +28,9 @@
 .page img { display: block; width: 100%; }
 .system { position: absolute; padding: 0; border: 1px solid transparent; border-radius: 1px; background: transparent; cursor: pointer; transition: background .12s, border-color .12s; }
 .system:hover { border-color: #e84d37; background: #e84d3718; }
-.system span { position: absolute; left: 3px; top: 3px; padding: 2px 4px; background: #fffde8cc; color: #8b877d; font: 9px monospace; }
+.system span { position: absolute; left: 1px; bottom: calc(100% + 2px); color: #8b877d; font: 9px/1 monospace; pointer-events: none; }
 .system.active { z-index: 2; border: 3px solid #e53e2b; background: #ef4b2f24; box-shadow: 0 0 0 1px #fff inset; }
-.system.active span { top: -22px; left: -3px; padding: 4px 7px; background: #e53e2b; color: #fff; font-weight: 700; }
+.system.active span { bottom: calc(100% + 4px); left: -1px; color: #e53e2b; font-weight: 700; }
 .measureCountdown { position: absolute; z-index: 5; left: 50%; top: -38px; width: 30px; height: 30px; display: grid; place-items: center; transform: translateX(-50%); border: 2px solid #fff; border-radius: 50%; background: #e53e2b; color: #fff; font: 700 16px/1 Arial, sans-serif; box-shadow: 0 3px 10px #0007; animation: countPulse 1s ease-out infinite; pointer-events: none; }
 .empty { min-height: calc(100dvh - 95px); display: flex; flex-direction: column; align-items: center; justify-content: center; color: #aaa; text-align: center; }
 .empty h3 { margin: 16px 0 0; font-size: 16px; font-weight: 500; }
@@ -38,4 +38,4 @@
 .spinner { width: 34px; height: 34px; border: 2px solid #666; border-top-color: #e24c38; border-radius: 50%; animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes countPulse { from { transform: translateX(-50%) scale(.82); opacity: .72; } to { transform: translateX(-50%) scale(1); opacity: 1; } }
-@media (max-width: 760px) { .toolbar { flex-wrap: wrap; } .youtubeInput { width: calc(100% - 154px); flex: 1; } .tempoControl { order: 4; } .meterControl { order: 5; } .progress { order: 6; flex-basis: 40%; } .offset { order: 7; } .measureCount { order: 8; margin-left: auto; } .pages { padding: 8px; } .page { width: calc(100vw - 16px); margin-bottom: 8px; } }
+@media (max-width: 760px) { .toolbar { flex-wrap: wrap; } .youtubeInput { width: calc(100% - 154px); flex: 1; } .tempoControl { order: 4; } .meterControl { order: 5; } .progress { order: 6; flex-basis: 40%; } .offset { order: 7; } .measureCount { order: 8; margin-left: auto; } .pages { padding: 8px; } .page { width: calc(100vw - 16px); margin-bottom: 8px; } .system span { font-size: 7px; } }
