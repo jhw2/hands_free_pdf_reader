@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { useLanguage } from "../lib/use-language";
 import type { Camera as MediaPipeCamera } from "@mediapipe/camera_utils";
@@ -1101,6 +1102,7 @@ export default function Home() {
       <header className="topbar">
         <div className="brand-block"><h1>{t("입으로 넘기는 악보")}</h1><p>{t("손은 연주에, 페이지는 입으로.")}</p></div>
         <div className="topbar-actions">
+          <Link href="/score-sync" className="score-sync-link">{t("악보 싱크")}</Link>
           <label className="language-control">
             <span className="sr-only">{t("언어")}</span>
             <select value={language} onChange={(event) => chooseLanguage(event.target.value as "ko" | "en")}>

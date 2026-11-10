@@ -5,6 +5,8 @@ button, input { font: inherit; }
 h1, h2, p { margin: 0; }
 button, .file-label { -webkit-tap-highlight-color: transparent; }
 button, .file-label { cursor: pointer; }
+.score-sync-link { min-height: 44px; padding: 11px 15px; display: inline-flex; align-items: center; border: 1px solid #ad8feb; border-radius: 12px; color: #e5d9ff; text-decoration: none; font-size: .85rem; background: #362d53; }
+.score-sync-link:hover { background: #48396f; }
 button { color: inherit; border: 1px solid #344157; border-radius: 12px; background: #202c3e; padding: 10px 16px; min-height: 44px; }
 button:hover { background: #2c3d55; }
 button:disabled { opacity: .35; cursor: not-allowed; }

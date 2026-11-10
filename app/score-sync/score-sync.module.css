@@ -1,0 +1,41 @@
+.shell { height: 100dvh; overflow: hidden; display: flex; flex-direction: column; background: #242424; color: #f6f6f2; font-family: Arial, "Noto Sans KR", sans-serif; }
+.hiddenPlayer { position: fixed; z-index: 0; left: 0; top: 58px; width: 320px; height: 200px; overflow: hidden; pointer-events: none; }
+.toolbar { position: relative; z-index: 2; min-height: 58px; padding: 8px 14px; display: flex; flex-shrink: 0; align-items: center; gap: 10px; background: #151515; border-bottom: 1px solid #3e3e3e; }
+.fileButton, .youtubeInput button, .playButton { min-height: 40px; border: 1px solid #4c4c4c; border-radius: 7px; background: #292929; color: #fff; font-size: 13px; }
+.fileButton { max-width: 180px; padding: 11px 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.fileButton input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.youtubeInput { display: flex; width: min(330px, 28vw); }
+.youtubeInput input { min-width: 0; flex: 1; height: 40px; padding: 0 11px; border: 1px solid #4c4c4c; border-right: 0; border-radius: 7px 0 0 7px; background: #202020; color: #fff; outline: none; }
+.youtubeInput button { padding: 0 13px; border-radius: 0 7px 7px 0; cursor: pointer; }
+.playButton { width: 44px; padding: 0; background: #e24c38; border-color: #e24c38; cursor: pointer; }
+.playButton:disabled { opacity: .35; cursor: default; }
+.tempoControl, .meterControl { display: flex; align-items: center; gap: 5px; flex-shrink: 0; color: #aaa; font-size: 10px; white-space: nowrap; }
+.tempoControl input, .meterControl select { height: 32px; border: 1px solid #4c4c4c; border-radius: 5px; background: #202020; color: #fff; font: 12px monospace; }
+.tempoControl input { width: 55px; padding: 0 5px; }
+.meterControl select { width: 54px; padding: 0 4px; }
+.progress { min-width: 80px; flex: 1; height: 4px; overflow: hidden; border-radius: 4px; background: #4a4a4a; }
+.progress span { display: block; height: 100%; background: #e24c38; transition: width .2s linear; }
+.clock, .measureCount { flex-shrink: 0; font: 11px/1 monospace; color: #c9c9c4; }
+.measureCount { min-width: 85px; text-align: right; color: #fff; }
+.offset { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #aaa; white-space: nowrap; }
+.offset input { width: 80px; accent-color: #e24c38; }
+.offset output { width: 34px; font: 10px monospace; color: #ddd; }
+.error { position: fixed; z-index: 20; top: 66px; left: 50%; transform: translateX(-50%); margin: 0; padding: 10px 16px; border-radius: 7px; background: #9f3026; color: white; font-size: 13px; box-shadow: 0 5px 20px #0006; }
+.warning { position: fixed; z-index: 19; top: 66px; left: 50%; transform: translateX(-50%); margin: 0; padding: 9px 14px; border-radius: 7px; background: #735713; color: #fff8d7; font-size: 12px; box-shadow: 0 5px 20px #0006; }
+.scorePanel { position: relative; z-index: 1; flex: 1; min-height: 0; background: #242424; }
+.pages { height: 100%; overflow: auto; padding: 18px; scroll-behavior: smooth; }
+.page { position: relative; width: min(1200px, calc(100vw - 36px)); margin: 0 auto 18px; background: white; box-shadow: 0 6px 24px #0007; }
+.page img { display: block; width: 100%; }
+.system { position: absolute; padding: 0; border: 1px solid transparent; border-radius: 1px; background: transparent; cursor: pointer; transition: background .12s, border-color .12s; }
+.system:hover { border-color: #e84d37; background: #e84d3718; }
+.system span { position: absolute; left: 3px; top: 3px; padding: 2px 4px; background: #fffde8cc; color: #8b877d; font: 9px monospace; }
+.system.active { z-index: 2; border: 3px solid #e53e2b; background: #ef4b2f24; box-shadow: 0 0 0 1px #fff inset; }
+.system.active span { top: -22px; left: -3px; padding: 4px 7px; background: #e53e2b; color: #fff; font-weight: 700; }
+.measureCountdown { position: absolute; z-index: 5; left: 50%; top: -38px; width: 30px; height: 30px; display: grid; place-items: center; transform: translateX(-50%); border: 2px solid #fff; border-radius: 50%; background: #e53e2b; color: #fff; font: 700 16px/1 Arial, sans-serif; box-shadow: 0 3px 10px #0007; animation: countPulse 1s ease-out infinite; pointer-events: none; }
+.empty { min-height: calc(100dvh - 95px); display: flex; flex-direction: column; align-items: center; justify-content: center; color: #aaa; text-align: center; }
+.empty h3 { margin: 16px 0 0; font-size: 16px; font-weight: 500; }
+.note { display: grid; place-items: center; width: 64px; height: 64px; border: 1px solid #666; border-radius: 50%; color: #eee; font: 29px Georgia, serif; }
+.spinner { width: 34px; height: 34px; border: 2px solid #666; border-top-color: #e24c38; border-radius: 50%; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes countPulse { from { transform: translateX(-50%) scale(.82); opacity: .72; } to { transform: translateX(-50%) scale(1); opacity: 1; } }
+@media (max-width: 760px) { .toolbar { flex-wrap: wrap; } .youtubeInput { width: calc(100% - 154px); flex: 1; } .tempoControl { order: 4; } .meterControl { order: 5; } .progress { order: 6; flex-basis: 40%; } .offset { order: 7; } .measureCount { order: 8; margin-left: auto; } .pages { padding: 8px; } .page { width: calc(100vw - 16px); margin-bottom: 8px; } }

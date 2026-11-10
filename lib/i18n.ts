@@ -78,6 +78,7 @@ export const english: Record<string, string> = {
   "사용법": "How to use",
   "악보 변경": "Change PDF",
   "최근 악보": "Recent scores",
+  "악보 싱크": "Score sync",
   "다시 저장": "Save again",
   "입으로 넘기려면 카메라 권한이 필요해요. 주소창의 사이트 설정에서 카메라를 허용한 뒤 ‘카메라 허용하기’를 눌러주세요.": "Camera access is needed for hands-free page turning. Allow camera access in your browser’s site settings, then select ‘Enable camera’.",
   "입으로 페이지 넘기기": "Hands-free page turning",
