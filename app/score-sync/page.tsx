@@ -1,6 +1,7 @@
 "use client";
 
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import type { PDFPageProxy } from "pdfjs-dist";
 import { compilePlaybackOrder, type NavigationMeasure } from "./navigation";
 import styles from "./score-sync.module.css";
 
@@ -64,6 +65,18 @@ const detectBeatsPerMeasure = (text: string) => {
   // shortcut: only labeled quarter-note meters are safe until the BPM beat unit is recognized.
   const match = text.replace(/\s+/g, " ").match(/(?:time\s*signature|meter|박자)\s*[:=]?\s*([2-9])\s*\/\s*4/i);
   return match ? Number(match[1]) : 4;
+};
+
+const readPdfTextItems = async (page: PDFPageProxy) => {
+  const reader = page.streamTextContent().getReader();
+  const items: unknown[] = [];
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) return items;
+      items.push(...value.items);
+    }
+  } finally { reader.releaseLock(); }
 };
 
 const SCORE_SYNC_LOCAL_KEY = "score-sync:last-session";
@@ -792,10 +805,10 @@ export default function ScoreSyncPage() {
       const nextPages: string[] = []; const nextMeasures: MeasureBox[] = []; const scoreText: string[] = [];
       for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
         const page = await pdf.getPage(pageNumber);
-        const textContent = await page.getTextContent();
+        const textItems = await readPdfTextItems(page);
         const base = page.getViewport({ scale: 1 });
         const viewport = page.getViewport({ scale: Math.min(2, 1200 / base.width) });
-        const pageTextItems = textContent.items.flatMap((raw: unknown): ScoreTextItem[] => {
+        const pageTextItems = textItems.flatMap((raw: unknown): ScoreTextItem[] => {
           const item = raw as { str?: unknown; transform?: number[]; width?: number; height?: number; fontName?: string };
           if (typeof item.str !== "string" || !Array.isArray(item.transform)) return [];
           scoreText.push(item.str);

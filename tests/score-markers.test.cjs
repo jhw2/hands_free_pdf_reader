@@ -5,19 +5,30 @@ const ts = require('typescript');
 
 const sourceText = fs.readFileSync(require.resolve('../app/score-sync/page.tsx'), 'utf8');
 const source = ts.createSourceFile('page.tsx', sourceText, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-const names = new Set(['detectBeatsPerMeasure', 'parseNavigationText', 'applyVoltaPasses', 'sharedBarPositions', 'hasDoubleBarRuns', 'isRepeatDotPair', 'clusterBarColumns', 'hasDenseInk', 'recoverAlignedBars', 'restoreSupportedBars']);
+const names = new Set(['detectBeatsPerMeasure', 'readPdfTextItems', 'parseNavigationText', 'applyVoltaPasses', 'sharedBarPositions', 'hasDoubleBarRuns', 'isRepeatDotPair', 'clusterBarColumns', 'hasDenseInk', 'recoverAlignedBars', 'restoreSupportedBars']);
 const helpers = source.statements.filter(node => names.has(node.declarationList?.declarations?.[0]?.name?.text));
-const snippet = `${helpers.map(node => node.getText(source)).join('\n')}\nmodule.exports = { detectBeatsPerMeasure, parseNavigationText, applyVoltaPasses, sharedBarPositions, hasDoubleBarRuns, isRepeatDotPair, clusterBarColumns, hasDenseInk, recoverAlignedBars, restoreSupportedBars };`;
+const snippet = `${helpers.map(node => node.getText(source)).join('\n')}\nmodule.exports = { detectBeatsPerMeasure, readPdfTextItems, parseNavigationText, applyVoltaPasses, sharedBarPositions, hasDoubleBarRuns, isRepeatDotPair, clusterBarColumns, hasDenseInk, recoverAlignedBars, restoreSupportedBars };`;
 const js = ts.transpileModule(snippet, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText;
 const loaded = { exports: {} };
 new Function('module', 'exports', js)(loaded, loaded.exports);
-const { detectBeatsPerMeasure, parseNavigationText, applyVoltaPasses, sharedBarPositions, hasDoubleBarRuns, isRepeatDotPair, clusterBarColumns, hasDenseInk, recoverAlignedBars, restoreSupportedBars } = loaded.exports;
+const { detectBeatsPerMeasure, readPdfTextItems, parseNavigationText, applyVoltaPasses, sharedBarPositions, hasDoubleBarRuns, isRepeatDotPair, clusterBarColumns, hasDenseInk, recoverAlignedBars, restoreSupportedBars } = loaded.exports;
 
 test('does not mistake PDF page counters for a time signature', () => {
   assert.equal(detectBeatsPerMeasure('Drowning 1/4 2/4 3/4 4/4'), 4);
   assert.equal(detectBeatsPerMeasure('Meter: 3/4'), 3);
+});
+
+test('reads PDF text without requiring Safari stream async iteration', async () => {
+  const chunks = [[{ str: 'first' }], [{ str: 'second' }]];
+  let released = false;
+  const page = { streamTextContent: () => ({ getReader: () => ({
+    read: async () => chunks.length ? { done: false, value: { items: chunks.shift() } } : { done: true },
+    releaseLock: () => { released = true; },
+  }) }) };
+  assert.deepEqual(await readPdfTextItems(page), [{ str: 'first' }, { str: 'second' }]);
+  assert.equal(released, true);
 });
 
 test('separates physical strokes before merging nearby barline ink', () => {
