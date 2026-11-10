@@ -51,6 +51,9 @@ const youtubeErrorMessage = (code: number) => {
   return `YouTube 재생 중 오류가 발생했어요. 같은 링크로 다시 연결해 주세요. (오류 ${code})`;
 };
 
+const shouldRetryYoutubeError = (code: number, attempts: number, playbackPending: boolean) =>
+  code === 150 && attempts < 1 && !playbackPending;
+
 const formatTime = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, "0")}`;
 
 const detectTempo = (text: string) => {
@@ -653,6 +656,7 @@ export default function ScoreSyncPage() {
   const playerRef = useRef<YoutubePlayer | null>(null);
   const countdownTimerRef = useRef<number | null>(null);
   const playerReadyRef = useRef(false);
+  const youtubeRetryRef = useRef(0);
   const desiredPlayingRef = useRef(false);
   const lastProgressRef = useRef({ time: 0, changedAt: 0 });
   const lastRecoveryRef = useRef(0);
@@ -719,6 +723,7 @@ export default function ScoreSyncPage() {
     let disposed = false;
     let createdPlayer: YoutubePlayer | null = null;
     let apiTimeout = 0;
+    let retryTimeout = 0;
     playerRef.current?.destroy();
     playerRef.current = null;
     container.replaceChildren();
@@ -749,9 +754,19 @@ export default function ScoreSyncPage() {
           },
           onError: (event: { data: number }) => {
             if (disposed) return;
+            const playbackPending = desiredPlayingRef.current || countdownTimerRef.current !== null;
             playerReadyRef.current = false;
             desiredPlayingRef.current = false;
             setPlayerReady(false);
+            if (retryTimeout) return;
+            if (shouldRetryYoutubeError(event.data, youtubeRetryRef.current, playbackPending)) {
+              youtubeRetryRef.current += 1;
+              setError("");
+              retryTimeout = window.setTimeout(() => {
+                if (!disposed) setPlayerGeneration((generation) => generation + 1);
+              }, 600);
+              return;
+            }
             setError(youtubeErrorMessage(event.data));
           },
           onAutoplayBlocked: () => {
@@ -783,6 +798,7 @@ export default function ScoreSyncPage() {
     return () => {
       disposed = true;
       if (apiTimeout) window.clearTimeout(apiTimeout);
+      if (retryTimeout) window.clearTimeout(retryTimeout);
       if (playerRef.current === createdPlayer) playerRef.current = null;
       createdPlayer?.destroy();
       container.replaceChildren();
@@ -885,6 +901,7 @@ export default function ScoreSyncPage() {
     setError("");
     setTime(0);
     setDuration(240);
+    youtubeRetryRef.current = 0;
     lastSelectedTargetRef.current = 0;
     try { storeMetadata({ youtubeUrl: url.trim() }); }
     catch { setError("링크를 연결했지만 브라우저 저장 공간에 저장하지 못했어요."); }

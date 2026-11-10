@@ -5,15 +5,15 @@ const ts = require('typescript');
 
 const sourceText = fs.readFileSync(require.resolve('../app/score-sync/page.tsx'), 'utf8');
 const source = ts.createSourceFile('page.tsx', sourceText, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-const names = new Set(['detectBeatsPerMeasure', 'readPdfTextItems', 'parseNavigationText', 'applyVoltaPasses', 'sharedBarPositions', 'hasDoubleBarRuns', 'isRepeatDotPair', 'clusterBarColumns', 'hasDenseInk', 'recoverAlignedBars', 'restoreSupportedBars']);
+const names = new Set(['detectBeatsPerMeasure', 'readPdfTextItems', 'shouldRetryYoutubeError', 'parseNavigationText', 'applyVoltaPasses', 'sharedBarPositions', 'hasDoubleBarRuns', 'isRepeatDotPair', 'clusterBarColumns', 'hasDenseInk', 'recoverAlignedBars', 'restoreSupportedBars']);
 const helpers = source.statements.filter(node => names.has(node.declarationList?.declarations?.[0]?.name?.text));
-const snippet = `${helpers.map(node => node.getText(source)).join('\n')}\nmodule.exports = { detectBeatsPerMeasure, readPdfTextItems, parseNavigationText, applyVoltaPasses, sharedBarPositions, hasDoubleBarRuns, isRepeatDotPair, clusterBarColumns, hasDenseInk, recoverAlignedBars, restoreSupportedBars };`;
+const snippet = `${helpers.map(node => node.getText(source)).join('\n')}\nmodule.exports = { detectBeatsPerMeasure, readPdfTextItems, shouldRetryYoutubeError, parseNavigationText, applyVoltaPasses, sharedBarPositions, hasDoubleBarRuns, isRepeatDotPair, clusterBarColumns, hasDenseInk, recoverAlignedBars, restoreSupportedBars };`;
 const js = ts.transpileModule(snippet, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText;
 const loaded = { exports: {} };
 new Function('module', 'exports', js)(loaded, loaded.exports);
-const { detectBeatsPerMeasure, readPdfTextItems, parseNavigationText, applyVoltaPasses, sharedBarPositions, hasDoubleBarRuns, isRepeatDotPair, clusterBarColumns, hasDenseInk, recoverAlignedBars, restoreSupportedBars } = loaded.exports;
+const { detectBeatsPerMeasure, readPdfTextItems, shouldRetryYoutubeError, parseNavigationText, applyVoltaPasses, sharedBarPositions, hasDoubleBarRuns, isRepeatDotPair, clusterBarColumns, hasDenseInk, recoverAlignedBars, restoreSupportedBars } = loaded.exports;
 
 test('does not mistake PDF page counters for a time signature', () => {
   assert.equal(detectBeatsPerMeasure('Drowning 1/4 2/4 3/4 4/4'), 4);
@@ -29,6 +29,13 @@ test('reads PDF text without requiring Safari stream async iteration', async () 
   }) }) };
   assert.deepEqual(await readPdfTextItems(page), [{ str: 'first' }, { str: 'second' }]);
   assert.equal(released, true);
+});
+
+test('retries a transient YouTube 150 once only while idle', () => {
+  assert.equal(shouldRetryYoutubeError(150, 0, false), true);
+  assert.equal(shouldRetryYoutubeError(150, 1, false), false);
+  assert.equal(shouldRetryYoutubeError(150, 0, true), false);
+  assert.equal(shouldRetryYoutubeError(101, 0, false), false);
 });
 
 test('separates physical strokes before merging nearby barline ink', () => {
