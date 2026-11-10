@@ -736,7 +736,7 @@ export default function ScoreSyncPage() {
       container.replaceChildren(mount);
       const Player = window.YT.Player;
       createdPlayer = new Player(mount, {
-        width: "320",
+        width: "200",
         height: "200",
         videoId,
         playerVars: { rel: 0, playsinline: 1, enablejsapi: 1, origin: window.location.origin },
@@ -981,7 +981,6 @@ export default function ScoreSyncPage() {
   };
 
   return <main className={styles.shell}>
-    <div className={styles.hiddenPlayer} aria-hidden="true">{videoId ? <div ref={playerHostRef}/> : null}</div>
     <header className={styles.toolbar}>
       <label className={styles.fileButton}>{fileName || "PDF 열기"}<input type="file" accept="application/pdf" onChange={loadPdf}/></label>
       <div className={styles.youtubeInput}><input value={url} onChange={(e) => setUrl(e.target.value)} onKeyDown={(e) => e.key === "Enter" && attachYoutube()} placeholder="YouTube 링크" aria-label="유튜브 링크"/><button onClick={attachYoutube}>연결</button></div>
@@ -996,6 +995,7 @@ export default function ScoreSyncPage() {
     {error && <p className={styles.error} role="alert">{error}</p>}
     {!error && measures.length > 0 && !navigation.valid && <p className={styles.warning} role="status">반복 경로를 확정하지 못해 악보 순서대로 표시합니다.</p>}
     <section className={styles.scorePanel}>
+      {videoId ? <div className={styles.miniPlayer}><div ref={playerHostRef}/></div> : null}
       <div className={styles.pages}>
         {loading ? <div className={styles.empty}><span className={styles.spinner}/><h3>마디선을 찾고 있어요</h3></div> : !pages.length ? <div className={styles.empty}><div className={styles.note}>♩</div><h3>PDF 악보를 열어주세요</h3></div> : pages.map((src, pageIndex) => <div className={styles.page} key={src}><img src={src} alt={`악보 ${pageIndex + 1}페이지`}/>{measures.map((box, index) => box.page === pageIndex + 1 && <button key={box.id} data-current={index === activeIndex ? "true" : undefined} onClick={() => jumpToMeasure(index)} className={`${styles.system} ${index === activeIndex ? styles.active : ""}`} style={{ top: `${box.top}%`, left: `${box.left}%`, width: `${box.width}%`, height: `${box.height}%` }} aria-label={`${index + 1}번 마디로 이동`}><span>{index === activeIndex ? "현재" : index + 1}</span>{countdown !== null && countdownMeasure === index ? <b className={styles.measureCountdown} role="timer" aria-live="assertive">{countdown}</b> : null}</button>)}</div>)}
       </div>
