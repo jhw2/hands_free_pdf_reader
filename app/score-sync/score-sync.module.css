@@ -1,5 +1,5 @@
 .shell { height: 100dvh; overflow: hidden; display: flex; flex-direction: column; background: #242424; color: #f6f6f2; font-family: Arial, "Noto Sans KR", sans-serif; }
-.miniPlayer { flex: 0 0 200px; align-self: flex-end; width: 200px; height: 200px; overflow: hidden; border: 1px solid #4c4c4c; border-radius: 7px 0 0; background: #000; box-shadow: 0 -5px 20px #0008; }
+.miniPlayer { width: 200px; height: 200px; margin: 0 0 18px auto; overflow: hidden; border: 1px solid #4c4c4c; border-radius: 7px; background: #000; box-shadow: 0 5px 20px #0008; }
 .toolbar { position: relative; z-index: 2; min-height: 58px; padding: 8px 14px; display: flex; flex-shrink: 0; align-items: center; gap: 10px; background: #151515; border-bottom: 1px solid #3e3e3e; }
 .fileButton, .youtubeInput button, .playButton { min-height: 40px; border: 1px solid #4c4c4c; border-radius: 7px; background: #292929; color: #fff; font-size: 13px; }
 .fileButton { max-width: 180px; padding: 11px 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
