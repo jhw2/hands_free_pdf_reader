@@ -470,8 +470,11 @@ function findMeasures(canvas: HTMLCanvasElement, page: number, textItems: ScoreT
   });
 
   const hasRepeatDots = (group: DetectedStaff[], boundary: number, side: -1 | 1) => {
+    // TAB fret numbers can resemble repeat dots; use the notation staves when present.
+    const notationStaves = group.filter((staff) => staff.lines.length === 5);
+    const repeatStaves = notationStaves.length ? notationStaves : group;
     let matchedStaves = 0;
-    group.forEach((staff) => {
+    repeatStaves.forEach((staff) => {
       const radius = Math.max(1, Math.round(staff.spacing * .32));
       const barColumns: number[] = [];
       for (let x = Math.ceil(Math.max(staff.left, boundary - staff.spacing * 1.6)); x <= Math.floor(Math.min(staff.right, boundary + staff.spacing * 1.6)); x++) {
@@ -492,30 +495,38 @@ function findMeasures(canvas: HTMLCanvasElement, page: number, textItems: ScoreT
       const maxX = Math.min(width - radius - 1, Math.ceil(Math.max(start, end)));
       let pairFound = false;
       for (let x = minX; x <= maxX && !pairFound; x++) {
-        const densities = yTargets.map((centerY) => {
-          let dark = 0;
-          let total = 0;
-          for (let py = Math.round(centerY) - radius; py <= Math.round(centerY) + radius; py++) {
-            for (let px = x - radius; px <= x + radius; px++) { total++; if (isDark(px, py)) dark++; }
+        // On small staves the sample can overlap a bar or staff line instead of a dot.
+        if (barColumns.some((column) => Math.abs(column - x) <= radius)) continue;
+        // Canvas renderers can place the same glyph one pixel above/below its staff-space center.
+        for (let shift = -1; shift <= 1 && !pairFound; shift++) {
+          const shiftedTargets = yTargets.map((y) => y + shift);
+          const densities = shiftedTargets.map((centerY) => {
+            let dark = 0;
+            let total = 0;
+            for (let py = Math.round(centerY) - radius; py <= Math.round(centerY) + radius; py++) {
+              const onStaffLine = staff.lines.some((line) => Math.abs(py - line) <= Math.max(1, staff.spacing * .16));
+              if (onStaffLine) continue;
+              for (let px = x - radius; px <= x + radius; px++) { total++; if (isDark(px, py)) dark++; }
+            }
+            return dark / Math.max(1, total);
+          });
+          let bridgeDark = 0;
+          let bridgeRows = 0;
+          for (let py = Math.round(shiftedTargets[0]) + radius; py <= Math.round(shiftedTargets[1]) - radius; py++) {
+            if (Math.abs(py - staff.lines[2]) <= Math.max(1, staff.spacing * .16)) continue;
+            bridgeRows++;
+            for (let px = x - radius; px <= x + radius; px++) {
+              if (!isDark(px, py)) continue;
+              bridgeDark++;
+              break;
+            }
           }
-          return dark / Math.max(1, total);
-        });
-        let bridgeDark = 0;
-        let bridgeRows = 0;
-        for (let py = Math.round(yTargets[0]) + radius; py <= Math.round(yTargets[1]) - radius; py++) {
-          if (Math.abs(py - staff.lines[2]) <= Math.max(1, staff.spacing * .16)) continue;
-          bridgeRows++;
-          for (let px = x - radius; px <= x + radius; px++) {
-            if (!isDark(px, py)) continue;
-            bridgeDark++;
-            break;
-          }
+          pairFound = isRepeatDotPair(densities, bridgeDark, bridgeRows);
         }
-        pairFound = isRepeatDotPair(densities, bridgeDark, bridgeRows);
       }
       if (pairFound && hasDoubleBar) matchedStaves++;
     });
-    return matchedStaves >= Math.max(1, Math.ceil(group.length / 2));
+    return matchedStaves >= Math.max(1, Math.ceil(repeatStaves.length / 2));
   };
 
   const measures: MeasureBox[] = [];
@@ -584,10 +595,19 @@ function findMeasures(canvas: HTMLCanvasElement, page: number, textItems: ScoreT
     const voltaBracketRight = (measure: MeasureBox) => {
       const startY = Math.max(1, Math.floor(first.coreTop - spacing * 6.5));
       const endY = Math.min(height - 2, Math.ceil(first.coreTop - spacing * .6));
+      const endingLabels = textItems.filter((item) => /^[1-9]\d?\.?$/.test(item.text.trim())
+        && item.x >= measure.pixelLeft && item.x < measure.pixelRight - spacing
+        && item.y >= startY && item.y + item.height < first.coreTop);
       let bestRight = 0;
       let bestY = 0;
       for (let y = startY; y <= endY; y++) {
-        const hookRight = measure === groupMeasures[0] ? measure.pixelLeft + spacing * 8 : measure.pixelLeft + spacing;
+        // A clef/key signature can push the first ending hook past the usual margin.
+        const labelRight = Math.max(measure.pixelLeft, ...endingLabels
+          .filter((item) => item.y >= y && item.y <= y + spacing)
+          .map((item) => item.x));
+        const hookRight = measure === groupMeasures[0]
+          ? Math.min(measure.pixelRight - spacing, Math.max(measure.pixelLeft + spacing * 8, labelRight))
+          : measure.pixelLeft + spacing;
         for (let hookX = Math.floor(measure.pixelLeft - spacing); hookX <= Math.ceil(hookRight); hookX++) {
           if (hookX < 1 || hookX >= width - 1) continue;
           let vertical = 0;

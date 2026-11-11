@@ -16,9 +16,12 @@ const helpers = source.statements.filter(node => ts.isVariableStatement(node)
   || (ts.isFunctionDeclaration(node) && node.name?.text !== 'ScoreSyncPage'));
 const pageModule = { exports: {} };
 new Function('module', 'findVectorStaves', 'vectorBarsForStaff', compile(
-  helpers.map(node => node.getText(source)).join('\n') + '\nmodule.exports = { findMeasures };',
+  helpers.map(node => node.getText(source)).join('\n') + '\nmodule.exports = { findMeasures, applyVoltaPasses };',
 ))(pageModule, findVectorStaves, vectorBarsForStaff);
-const { findMeasures } = pageModule.exports;
+const { findMeasures, applyVoltaPasses } = pageModule.exports;
+const navigationModule = { exports: {} };
+new Function('module', 'exports', compile(fs.readFileSync(require.resolve('../app/score-sync/navigation.ts'), 'utf8')))(navigationModule, navigationModule.exports);
+const { compilePlaybackOrder } = navigationModule.exports;
 
 let pdfjs;
 before(async () => {
@@ -149,6 +152,48 @@ test('repeat dot edges are not counted as a connecting stem', () => {
   assert.equal(findMeasures(image, 1, [], geometry)[0].repeatStart, true);
 });
 
+test('a close double bar without dots is not a repeat end on a narrow staff', () => {
+  for (const spacing of [8, 8.3]) {
+    const image = canvas();
+    const geometry = { horizontal: [], vertical: [] };
+    addStaff(geometry, 100, spacing, 5, [72, 400, 700, 1142]);
+    for (const line of geometry.horizontal) image.rect(line.left, line.y, line.right, line.y);
+    for (const x of [395, 400]) image.rect(x, 100, x, 100 + spacing * 4);
+    const measures = findMeasures(image, 1, [], geometry);
+    assert.equal(measures[0].repeatEnd, undefined, `spacing ${spacing}`);
+  }
+});
+
+test('small repeat dots on a narrow staff preserve the repeated playback section', () => {
+  const image = canvas();
+  const geometry = { horizontal: [], vertical: [] };
+  addStaff(geometry, 100, 8, 5, [72, 400, 700, 1142]);
+  for (const line of geometry.horizontal) image.rect(line.left, line.y, line.right, line.y);
+  for (const x of [72, 400, 404, 700, 1138, 1142]) image.rect(x, 100, x, 132);
+  for (const x of [410, 1130]) {
+    image.rect(x, 111, x + 2, 113);
+    image.rect(x, 119, x + 2, 121);
+  }
+  const measures = findMeasures(image, 1, [], geometry);
+  assert.equal(measures.length, 3);
+  assert.equal(measures[1].repeatStart, true);
+  assert.equal(measures[2].repeatEnd, true);
+  assert.deepEqual(compilePlaybackOrder(measures), { order: [0, 1, 2, 1, 2], warnings: [], valid: true });
+});
+
+test('recognizes repeat dots beside staff lines rasterized across adjacent pixels', () => {
+  const image = canvas();
+  const geometry = { horizontal: [], vertical: [] };
+  addStaff(geometry, 1041, 8.31, 5, [72, 400, 700, 1142]);
+  for (const [top, bottom] of [[1041, 1041], [1049, 1050], [1057, 1058], [1066, 1066], [1074, 1075]]) {
+    image.rect(72, top, 1142, bottom);
+  }
+  for (const x of [1132, 1140]) image.rect(x, 1041, x, 1075);
+  image.rect(1125, 1051, 1129, 1054);
+  image.rect(1125, 1059, 1129, 1062);
+  assert.equal(findMeasures(image, 3, [], geometry)[2].repeatEnd, true);
+});
+
 test('an instrument bracket outside the staff is not a second repeat barline', () => {
   const image = canvas();
   const geometry = { horizontal: [], vertical: [] };
@@ -158,6 +203,96 @@ test('an instrument bracket outside the staff is not a second repeat barline', (
   image.rect(84, 625, 87, 629);
   image.rect(84, 634, 87, 638);
   assert.equal(findMeasures(image, 1, [], geometry)[0].repeatStart, undefined);
+});
+
+test('TAB marks beside a double bar cannot outvote an unmarked melody staff', () => {
+  for (const melodyDots of [false, true]) {
+    const image = canvas();
+    const geometry = { horizontal: [], vertical: [] };
+    for (const [top, count] of [[100, 5], [220, 6], [340, 6]]) {
+      addStaff(geometry, top, 10, count, [72, 400, 700, 1142]);
+      for (const x of [400, 405]) image.rect(x, top, x, top + (count - 1) * 10);
+      if (count === 6 || melodyDots) {
+        image.rect(412, top + 13, 416, top + 17);
+        image.rect(412, top + 23, 416, top + 27);
+      }
+    }
+    geometry.vertical.push({ x: 72, top: 100, bottom: 390 });
+    for (const line of geometry.horizontal) image.rect(line.left, line.y, line.right, line.y);
+    const measures = findMeasures(image, 3, [], geometry);
+    assert.equal(measures.length, 3);
+    assert.equal(measures[1].repeatStart, melodyDots ? true : undefined);
+  }
+});
+
+test('recognizes repeat dots when the score contains only six-line TAB', () => {
+  const image = canvas();
+  const geometry = { horizontal: [], vertical: [] };
+  addStaff(geometry, 100, 10, 6, [72, 400, 700, 1142]);
+  for (const line of geometry.horizontal) image.rect(line.left, line.y, line.right, line.y);
+  for (const x of [72, 77, 400, 700, 1137, 1142]) image.rect(x, 100, x, 150);
+  for (const x of [84, 1125]) {
+    image.rect(x, 113, x + 4, 117);
+    image.rect(x, 123, x + 4, 127);
+  }
+  const measures = findMeasures(image, 1, [], geometry);
+  assert.equal(measures[0].repeatStart, true);
+  assert.equal(measures[2].repeatEnd, true);
+  assert.deepEqual(compilePlaybackOrder(measures), { order: [0, 1, 2, 0, 1, 2], warnings: [], valid: true });
+});
+
+test('takes the second ending after a wide clef and key signature on the next page', () => {
+  const image = canvas();
+  const geometry = { horizontal: [], vertical: [] };
+  const edges = [72, 345, 600, 850, 1142];
+  addStaff(geometry, 100, 8.3, 5, edges);
+  addStaff(geometry, 220, 9.24, 6, edges);
+  addStaff(geometry, 330, 9.24, 6, edges);
+  geometry.vertical.push({ x: 72, top: 100, bottom: 376.2 });
+  image.rect(148, 57, 345, 57);
+  image.rect(148, 57, 148, 82);
+  const label = { text: '2', x: 156, y: 60, width: 7, height: 14, fontName: 'ending' };
+  const measures = findMeasures(image, 3, [label], geometry);
+  assert.equal(measures.length, 4);
+  assert.ok(measures[0].voltaGroup);
+  assert.equal(measures[0].voltaOpen, true);
+  assert.ok(measures.slice(1).every(measure => !measure.voltaGroup));
+
+  const firstImage = canvas();
+  const firstGeometry = { horizontal: [], vertical: [] };
+  addStaff(firstGeometry, 100, 10, 5, [72, 400, 700, 1142]);
+  for (const line of firstGeometry.horizontal) firstImage.rect(line.left, line.y, line.right, line.y);
+  for (const x of [72, 77, 400, 700, 1137, 1142]) firstImage.rect(x, 100, x, 140);
+  for (const x of [84, 1125]) {
+    firstImage.rect(x, 113, x + 4, 117);
+    firstImage.rect(x, 123, x + 4, 127);
+  }
+  firstImage.rect(400, 65, 700, 65);
+  firstImage.rect(400, 65, 400, 90);
+  const score = [...findMeasures(firstImage, 2, [], firstGeometry), ...measures];
+  applyVoltaPasses(score);
+  assert.deepEqual(score.map(measure => measure.volta), [undefined, [1], [1], [2], undefined, undefined, undefined]);
+  assert.deepEqual(compilePlaybackOrder(score), { order: [0, 1, 2, 0, 3, 4, 5, 6], warnings: [], valid: true });
+});
+
+test('an ending number without a bracket does not create an ending', () => {
+  const geometry = { horizontal: [], vertical: [] };
+  addStaff(geometry, 100, 10, 5, [72, 400, 700, 1142]);
+  const label = { text: '2', x: 188, y: 68, width: 7, height: 14, fontName: 'ending' };
+  assert.ok(findMeasures(canvas(), 1, [label], geometry).every(measure => !measure.voltaGroup));
+});
+
+test('a beam inside the first measure needs an aligned ending number to extend the hook search', () => {
+  const image = canvas();
+  const geometry = { horizontal: [], vertical: [] };
+  addStaff(geometry, 100, 10, 5, [72, 400, 700, 1142]);
+  image.rect(180, 65, 330, 65);
+  image.rect(180, 65, 180, 90);
+  const label = { text: '2', x: 188, y: 68, width: 7, height: 14, fontName: 'ending' };
+  for (const textItems of [[], [{ ...label, text: 'Verse' }], [{ ...label, y: 105 }], [{ ...label, y: 40 }]]) {
+    const measures = findMeasures(image, 1, textItems, geometry);
+    assert.ok(measures.every(measure => !measure.voltaGroup), JSON.stringify(textItems));
+  }
 });
 
 test('distinguishes an open volta bracket from one with a closing hook', () => {
