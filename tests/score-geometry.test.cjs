@@ -164,6 +164,28 @@ test('a close double bar without dots is not a repeat end on a narrow staff', ()
   }
 });
 
+test('a quarter rest beside a double bar is not a repeat start, even on a single staff', () => {
+  const image = canvas();
+  const geometry = { horizontal: [], vertical: [] };
+  addStaff(geometry, 412.2, 9.24, 5, [72.24, 474.12, 810.12, 1142.4]);
+  for (const [top, bottom] of [[411, 412], [420, 421], [430, 431], [439, 440], [448, 449]]) image.rect(72, top, 1142, bottom);
+  for (const x of [805, 810]) image.rect(x, 412, x, 449);
+  const rest = [
+    '.........#', '.........##', '..........#', '..........##', '', '',
+    '...........####', '...........#####', '...........#####', '..........######',
+    '..........#####', '.........######', '........######', '........######', '', '',
+    '...........###', '...........###', '............##', '.........######',
+    '........########', '........#########', '.......######..##', '', '',
+    '.........###', '..........##', '............#',
+  ];
+  rest.forEach((row, y) => [...row].forEach((pixel, x) => {
+    if (pixel === '#') image.rect(819 + x, 416 + y, 819 + x, 416 + y);
+  }));
+  const measures = findMeasures(image, 3, [], geometry);
+  assert.equal(measures[2].repeatStart, undefined);
+  assert.deepEqual(compilePlaybackOrder(measures), { order: [0, 1, 2], warnings: [], valid: true });
+});
+
 test('small repeat dots on a narrow staff preserve the repeated playback section', () => {
   const image = canvas();
   const geometry = { horizontal: [], vertical: [] };

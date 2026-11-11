@@ -500,16 +500,20 @@ function findMeasures(canvas: HTMLCanvasElement, page: number, textItems: ScoreT
         // Canvas renderers can place the same glyph one pixel above/below its staff-space center.
         for (let shift = -1; shift <= 1 && !pairFound; shift++) {
           const shiftedTargets = yTargets.map((y) => y + shift);
+          let touchesSide = false;
           const densities = shiftedTargets.map((centerY) => {
             let dark = 0;
             let total = 0;
             for (let py = Math.round(centerY) - radius; py <= Math.round(centerY) + radius; py++) {
               const onStaffLine = staff.lines.some((line) => Math.abs(py - line) <= Math.max(1, staff.spacing * .16));
               if (onStaffLine) continue;
+              touchesSide ||= isDark(x - radius - 1, py) || isDark(x + radius + 1, py);
               for (let px = x - radius; px <= x + radius; px++) { total++; if (isDark(px, py)) dark++; }
             }
             return dark / Math.max(1, total);
           });
+          // A dot must fit inside the sample; clipped edges of rests can resemble two separate dots.
+          if (touchesSide) continue;
           let bridgeDark = 0;
           let bridgeRows = 0;
           for (let py = Math.round(shiftedTargets[0]) + radius; py <= Math.round(shiftedTargets[1]) - radius; py++) {
