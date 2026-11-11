@@ -906,11 +906,25 @@ export default function ScoreSyncPage() {
     };
   }, [playerGeneration, videoId]);
 
+  const disconnectYoutube = () => {
+    if (countdownTimerRef.current !== null) window.clearInterval(countdownTimerRef.current);
+    countdownTimerRef.current = null;
+    desiredPlayingRef.current = false;
+    playerReadyRef.current = false;
+    lastSelectedTargetRef.current = 0;
+    youtubeRetryRef.current = 0;
+    setUrl(""); setVideoId(null); setPlayerReady(false); setPlaying(false);
+    setCountdown(null); setCountdownMeasure(null);
+    setTime(0); setOffset(0); setDuration(240); setError("");
+    try { storeMetadata({ youtubeUrl: "" }); }
+    catch { setError("이전 YouTube 링크를 저장 공간에서 지우지 못했어요."); }
+  };
+
   const openPdfBlob = async (blob: Blob, nextFileName: string, shouldPersist: boolean, requestedVersion?: number) => {
     const loadVersion = requestedVersion ?? ++pdfLoadVersionRef.current;
     if (loadVersion !== pdfLoadVersionRef.current) return;
     setLoading(true); setError(""); setPages([]); setMeasures([]); setFileName(nextFileName);
-    if (shouldPersist) { setBpm(120); setBeatsPerMeasure(4); setTempoDetected(false); }
+    if (shouldPersist) { disconnectYoutube(); setBpm(120); setBeatsPerMeasure(4); setTempoDetected(false); }
     try {
       const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
       pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
@@ -1081,7 +1095,7 @@ export default function ScoreSyncPage() {
   return <main className={styles.shell}>
     <header className={styles.toolbar}>
       <label className={styles.fileButton}>{fileName || "PDF 열기"}<input type="file" accept="application/pdf" onChange={loadPdf}/></label>
-      <div className={styles.youtubeInput}><input value={url} onChange={(e) => setUrl(e.target.value)} onKeyDown={(e) => e.key === "Enter" && attachYoutube()} placeholder="YouTube 링크" aria-label="유튜브 링크"/><button onClick={attachYoutube}>연결</button></div>
+      <div className={styles.youtubeInput}><input type="search" inputMode="url" autoComplete="off" autoCapitalize="none" spellCheck={false} value={url} onChange={(e) => e.target.value ? setUrl(e.target.value) : disconnectYoutube()} onKeyDown={(e) => e.key === "Enter" && attachYoutube()} placeholder="YouTube 링크" aria-label="유튜브 링크"/><button onClick={attachYoutube}>연결</button></div>
       <button className={styles.playButton} onClick={togglePlayback} disabled={!playerReady} aria-label={playing ? "일시 정지" : "재생"}>{playing ? "Ⅱ" : "▶"}</button>
       <label className={styles.tempoControl}><span>{tempoDetected ? "감지 BPM" : "BPM"}</span><input type="number" min="30" max="300" value={bpm} onChange={(event) => updateBpm(Number(event.target.value))}/></label>
       <label className={styles.meterControl}><span>박자</span><select value={beatsPerMeasure} onChange={(event) => updateBeatsPerMeasure(Number(event.target.value))}><option value={2}>2박</option><option value={3}>3박</option><option value={4}>4박</option><option value={6}>6박</option></select></label>
