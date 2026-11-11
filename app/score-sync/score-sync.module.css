@@ -29,8 +29,8 @@
 .system { position: absolute; padding: 0; border: 1px solid transparent; border-radius: 1px; background: transparent; cursor: pointer; transition: background .12s, border-color .12s; }
 .system:hover { border-color: #e84d37; background: #e84d3718; }
 .system span { position: absolute; left: 1px; bottom: calc(100% + 2px); color: #8b877d; font: 9px/1 monospace; pointer-events: none; }
-.system.active { z-index: 2; border: 3px solid #e53e2b; background: #ef4b2f24; box-shadow: 0 0 0 1px #fff inset; }
-.system.active span { bottom: calc(100% + 4px); left: -1px; color: #e53e2b; font-weight: 700; }
+.system.active { z-index: 2; border-color: #e53e2b; background: #ef4b2f24; }
+.system.active span { color: #e53e2b; font-weight: 700; }
 .measureCountdown { position: absolute; z-index: 5; left: 50%; top: -38px; width: 30px; height: 30px; display: grid; place-items: center; transform: translateX(-50%); border: 2px solid #fff; border-radius: 50%; background: #e53e2b; color: #fff; font: 700 16px/1 Arial, sans-serif; box-shadow: 0 3px 10px #0007; animation: countPulse 1s ease-out infinite; pointer-events: none; }
 .empty { min-height: calc(100dvh - 95px); display: flex; flex-direction: column; align-items: center; justify-content: center; color: #aaa; text-align: center; }
 .empty h3 { margin: 16px 0 0; font-size: 16px; font-weight: 500; }
