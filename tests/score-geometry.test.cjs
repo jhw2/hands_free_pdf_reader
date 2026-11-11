@@ -227,6 +227,34 @@ test('an instrument bracket outside the staff is not a second repeat barline', (
   assert.equal(findMeasures(image, 1, [], geometry)[0].repeatStart, undefined);
 });
 
+test('finds a repeat after a percussion clef without treating the clef as a repeat', () => {
+  for (const withRepeat of [false, true]) {
+    const image = canvas();
+    const geometry = { horizontal: [], vertical: [] };
+    for (const top of [100, 300]) {
+      addStaff(geometry, top, 9, 5, [72, 400, 700, 1142]);
+      for (const x of [72, 400, 700, 1142]) image.rect(x, top, x, top + 36);
+      for (const x of [83, 91]) image.rect(x, top + 9, x + 2, top + 27);
+    }
+    for (const line of geometry.horizontal) image.rect(line.left, line.y, line.right, line.y);
+    if (withRepeat) {
+      for (const x of [102, 110, 1134]) image.rect(x, 300, x, 336);
+      for (const x of [116, 1125]) {
+        image.rect(x, 312, x + 2, 315);
+        image.rect(x, 321, x + 2, 324);
+      }
+    }
+    for (const vectors of [geometry, undefined]) {
+      const measures = findMeasures(image, 1, [], vectors);
+      assert.equal(measures.length, 6);
+      assert.deepEqual(measures.flatMap((measure, index) => measure.repeatStart ? [index] : []), withRepeat ? [3] : []);
+      assert.deepEqual(compilePlaybackOrder(measures), {
+        order: withRepeat ? [0, 1, 2, 3, 4, 5, 3, 4, 5] : [0, 1, 2, 3, 4, 5], warnings: [], valid: true,
+      });
+    }
+  }
+});
+
 test('TAB marks beside a double bar cannot outvote an unmarked melody staff', () => {
   for (const melodyDots of [false, true]) {
     const image = canvas();
@@ -302,6 +330,40 @@ test('an ending number without a bracket does not create an ending', () => {
   addStaff(geometry, 100, 10, 5, [72, 400, 700, 1142]);
   const label = { text: '2', x: 188, y: 68, width: 7, height: 14, fontName: 'ending' };
   assert.ok(findMeasures(canvas(), 1, [label], geometry).every(measure => !measure.voltaGroup));
+});
+
+test('ignores drum beams and follows an open ending to a high second-ending bracket', () => {
+  const image = canvas();
+  const geometry = { horizontal: [], vertical: [] };
+  for (const top of [100, 300]) addStaff(geometry, top, 10, 5, [72, 400, 700, 1142]);
+  image.rect(700, 60, 1142, 60);
+  image.rect(700, 60, 700, 85);
+  image.rect(115, 265, 330, 269); // Drum beam with stems, not an ending bracket.
+  for (const x of [115, 180, 250, 330]) image.rect(x, 265, x, 295);
+  image.rect(700, 220, 1142, 220);
+  image.rect(700, 220, 700, 280);
+  const labels = [
+    { text: '1', x: 710, y: 64, width: 7, height: 14, fontName: 'ending' },
+    { text: '2', x: 710, y: 224, width: 7, height: 14, fontName: 'ending' },
+  ];
+  const measures = findMeasures(image, 1, labels, geometry);
+  assert.equal(measures[3].voltaGroup, undefined);
+  assert.ok(measures[5].voltaGroup);
+  measures[0].repeatStart = true;
+  measures[4].repeatEnd = true;
+  applyVoltaPasses(measures);
+  assert.deepEqual(measures.map(measure => measure.volta), [undefined, undefined, [1], [1], [1], [2]]);
+  assert.deepEqual(compilePlaybackOrder(measures), { order: [0, 1, 2, 3, 4, 0, 1, 5], warnings: [], valid: true });
+});
+
+test('a high ending search does not cross into the preceding staff and its numbers', () => {
+  const image = canvas();
+  const geometry = { horizontal: [], vertical: [] };
+  for (const top of [100, 220]) addStaff(geometry, top, 10, 5, [72, 400, 700, 1142]);
+  for (const line of geometry.horizontal) image.rect(line.left, line.y, line.right, line.y);
+  for (const line of geometry.vertical) image.rect(line.x, line.top, line.x, line.bottom);
+  const label = { text: '2', x: 83, y: 134, width: 7, height: 6, fontName: 'tab' };
+  assert.ok(findMeasures(image, 1, [label], geometry).every(measure => !measure.voltaGroup));
 });
 
 test('a beam inside the first measure needs an aligned ending number to extend the hook search', () => {
