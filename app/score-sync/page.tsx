@@ -783,7 +783,8 @@ export default function ScoreSyncPage() {
         const state = playerRef.current.getPlayerState();
         pollFailuresRef.current = 0;
         if (Math.abs(next - lastProgressRef.current.time) > .015) lastProgressRef.current = { time: next, changedAt: now };
-        setTime(next || 0);
+        // YouTube can report the old position while seekTo is pending; keep the countdown on the selected measure.
+        if (countdownTimerRef.current === null) setTime(next || 0);
         setPlaying(state === 1);
         if (actualDuration > 0) setDuration((current) => current === 240 ? Math.round(actualDuration) : current);
 

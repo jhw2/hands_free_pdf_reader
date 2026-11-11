@@ -4,9 +4,11 @@ const fs = require('node:fs');
 const ts = require('typescript');
 
 const source = ts.createSourceFile('page.tsx', fs.readFileSync(require.resolve('../app/score-sync/page.tsx'), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-let reset;
+let reset, poll;
 function visit(node) {
   if (ts.isVariableDeclaration(node) && node.name.getText(source) === 'disconnectYoutube') reset = node.initializer.getText(source);
+  if (ts.isCallExpression(node) && node.expression.getText(source) === 'window.setInterval'
+    && node.arguments[1]?.getText(source) === '60') poll = node.arguments[0].getText(source);
   ts.forEachChild(node, visit);
 }
 visit(source);
@@ -54,4 +56,28 @@ test('storage failure still disconnects playback and reports that the old link c
   assert.equal(env.desiredPlayingRef.current, false);
   assert.equal(env.countdownTimerRef.current, null);
   assert.match(state.Error, /저장 공간/);
+});
+
+test('delayed YouTube seek samples cannot replace the selected measure during its countdown', () => {
+  let displayedTime = 90;
+  let youtubeTime = 0;
+  const env = {
+    playerRef: { current: { getCurrentTime: () => youtubeTime, getDuration: () => 240, getPlayerState: () => 2 } },
+    playerReadyRef: { current: true }, countdownTimerRef: { current: 42 }, desiredPlayingRef: { current: false },
+    lastProgressRef: { current: { time: 0, changedAt: 0 } }, pollFailuresRef: { current: 0 },
+    setTime: value => { displayedTime = value; }, setPlaying: () => {}, setDuration: () => {},
+    setError: message => assert.fail(message), performance: { now: () => 1000 },
+  };
+  const compiled = ts.transpileModule(`const poll = ${poll};`, { compilerOptions: { target: ts.ScriptTarget.ES2020 } }).outputText;
+  const tick = new Function(...Object.keys(env), `${compiled}\nreturn poll;`)(...Object.values(env));
+  tick();
+  assert.equal(displayedTime, 90, 'the old zero timestamp must not scroll back to the first measure');
+  displayedTime = 120; // The user selects a different measure while the earlier seek is still completing.
+  youtubeTime = 90;
+  tick();
+  assert.equal(displayedTime, 120);
+  env.countdownTimerRef.current = null;
+  youtubeTime = 121;
+  tick();
+  assert.equal(displayedTime, 121, 'normal playback tracking resumes after the countdown');
 });
