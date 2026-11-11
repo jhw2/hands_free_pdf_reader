@@ -149,6 +149,32 @@ test('repeat dot edges are not counted as a connecting stem', () => {
   assert.equal(findMeasures(image, 1, [], geometry)[0].repeatStart, true);
 });
 
+test('an instrument bracket outside the staff is not a second repeat barline', () => {
+  const image = canvas();
+  const geometry = { horizontal: [], vertical: [] };
+  addStaff(geometry, 614.76, 8.31, 5, [72, 400, 1142]);
+  for (const line of geometry.horizontal) image.rect(line.left, line.y, line.right, line.y);
+  for (const x of [66, 72, 400, 1142]) image.rect(x, 615, x, 648);
+  image.rect(84, 625, 87, 629);
+  image.rect(84, 634, 87, 638);
+  assert.equal(findMeasures(image, 1, [], geometry)[0].repeatStart, undefined);
+});
+
+test('distinguishes an open volta bracket from one with a closing hook', () => {
+  for (const closed of [false, true]) {
+    const image = canvas();
+    const geometry = { horizontal: [], vertical: [] };
+    addStaff(geometry, 100, 10, 5, [72, 400, 700, 1142]);
+    image.rect(400, 65, 1142, 65);
+    image.rect(400, 65, 400, 90);
+    if (closed) image.rect(1142, 65, 1142, 90);
+    const measures = findMeasures(image, 1, [], geometry);
+    assert.equal(measures[0].voltaGroup, undefined);
+    assert.equal(measures[1].voltaGroup, measures[2].voltaGroup);
+    assert.equal(measures[2].voltaOpen, !closed);
+  }
+});
+
 test('installed PDF.js exposes line coordinates before rendering mutates its paths', async () => {
   const content = 'q 2 0 0 2 10 20 cm 5 5 m 5 25 l S Q';
   const objects = ['<< /Type /Catalog /Pages 2 0 R >>', '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',

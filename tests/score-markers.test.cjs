@@ -91,6 +91,31 @@ test('numbers consecutive volta brackets from their repeat structure', () => {
   assert.equal(unrelated[0].volta, undefined);
 });
 
+test('continues an open first ending across systems and pages to the next ending', () => {
+  const measures = Array.from({ length: 99 }, () => ({}));
+  measures[17].repeatStart = true;
+  Object.assign(measures[24], { voltaGroup: '3-0-3', voltaOpen: true });
+  measures[40].repeatEnd = true;
+  Object.assign(measures[41], { voltaGroup: '4-1-4', voltaOpen: true });
+  applyVoltaPasses(measures);
+  assert.ok(measures.slice(24, 41).every(measure => measure.volta?.[0] === 1));
+  assert.deepEqual(measures[41].volta, [2]);
+  assert.ok([...measures.slice(0, 24), ...measures.slice(42)].every(measure => !measure.volta));
+});
+
+test('does not extend a closed or unpaired bracket, or cross another repeat start', () => {
+  for (const condition of ['closed', 'no repeat end', 'another repeat']) {
+    const measures = [
+      { voltaGroup: 'first', voltaOpen: condition !== 'closed' },
+      condition === 'another repeat' ? { repeatStart: true } : {},
+      condition === 'no repeat end' ? {} : { repeatEnd: true },
+      { voltaGroup: 'next', voltaOpen: true },
+    ];
+    applyVoltaPasses(measures);
+    assert.ok(measures.every(measure => !measure.volta), condition);
+  }
+});
+
 test('keeps a barline found by two of three connected staves', () => {
   assert.deepEqual(sharedBarPositions([[100], [101], []], 2), [101]);
   assert.deepEqual(sharedBarPositions([[100], [], []], 2), []);

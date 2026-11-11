@@ -13,6 +13,7 @@ type MeasureBox = NavigationMeasure & {
   pixelLeft: number; pixelRight: number; staffTop: number; staffBottom: number; spacing: number;
   repeatCountHint?: number;
   voltaGroup?: string;
+  voltaOpen?: boolean;
 };
 type YoutubePlayer = { getCurrentTime(): number; getDuration(): number; getPlayerState(): number; playVideo(): void; pauseVideo(): void; seekTo(time: number, allowSeekAhead: boolean): void; mute(): void; unMute(): void; destroy(): void };
 
@@ -223,6 +224,16 @@ const applyVoltaPasses = (measures: MeasureBox[]) => {
     const indexes = groups.get(measure.voltaGroup) ?? [];
     indexes.push(index);
     groups.set(measure.voltaGroup, indexes);
+  });
+  const endings = [...groups.values()];
+  endings.forEach((indexes, index) => {
+    const end = indexes.at(-1)!;
+    const nextStart = endings[index + 1]?.[0];
+    // An open ending can continue across systems/pages until the repeat before its next ending.
+    if (!measures[end].voltaOpen || nextStart === undefined || !measures[nextStart - 1].repeatEnd
+      || indexes.some(position => measures[position].repeatEnd)
+      || measures.slice(end + 1, nextStart - 1).some(measure => measure.repeatStart || measure.repeatEnd)) return;
+    for (let position = end + 1; position < nextStart; position++) indexes.push(position);
   });
   let pass = 0;
   let previousEnd = -2;
@@ -463,7 +474,7 @@ function findMeasures(canvas: HTMLCanvasElement, page: number, textItems: ScoreT
     group.forEach((staff) => {
       const radius = Math.max(1, Math.round(staff.spacing * .32));
       const barColumns: number[] = [];
-      for (let x = Math.floor(boundary - staff.spacing * 1.6); x <= Math.ceil(boundary + staff.spacing * 1.6); x++) {
+      for (let x = Math.ceil(Math.max(staff.left, boundary - staff.spacing * 1.6)); x <= Math.floor(Math.min(staff.right, boundary + staff.spacing * 1.6)); x++) {
         let dark = 0;
         let checked = 0;
         for (let y = Math.ceil(staff.coreTop); y <= Math.floor(staff.coreBottom); y++) {
@@ -574,6 +585,7 @@ function findMeasures(canvas: HTMLCanvasElement, page: number, textItems: ScoreT
       const startY = Math.max(1, Math.floor(first.coreTop - spacing * 6.5));
       const endY = Math.min(height - 2, Math.ceil(first.coreTop - spacing * .6));
       let bestRight = 0;
+      let bestY = 0;
       for (let y = startY; y <= endY; y++) {
         const hookRight = measure === groupMeasures[0] ? measure.pixelLeft + spacing * 8 : measure.pixelLeft + spacing;
         for (let hookX = Math.floor(measure.pixelLeft - spacing); hookX <= Math.ceil(hookRight); hookX++) {
@@ -589,17 +601,30 @@ function findMeasures(canvas: HTMLCanvasElement, page: number, textItems: ScoreT
             if (dark) { lastDark = x; gap = 0; }
             else if (++gap > Math.max(3, spacing * .45)) break;
           }
-          if (lastDark - hookX >= Math.max(spacing * 3, (measure.pixelRight - measure.pixelLeft) * .32)) bestRight = Math.max(bestRight, lastDark);
+          if (lastDark - hookX >= Math.max(spacing * 3, (measure.pixelRight - measure.pixelLeft) * .32) && lastDark > bestRight) {
+            bestRight = lastDark;
+            bestY = y;
+          }
         }
       }
-      return bestRight || null;
+      if (!bestRight) return null;
+      let hookRows = 0;
+      let checkedRows = 0;
+      for (let y = Math.ceil(bestY + spacing * .5); y <= Math.min(first.coreTop - 1, bestY + spacing * 2); y++) {
+        checkedRows++;
+        if (isDark(bestRight - 1, y) || isDark(bestRight, y) || isDark(bestRight + 1, y)) hookRows++;
+      }
+      return { right: bestRight, open: checkedRows > 0 && hookRows / checkedRows < .48 };
     };
 
     groupMeasures.forEach((measure, measureIndex) => {
-      const bracketRight = voltaBracketRight(measure);
-      if (!bracketRight) return;
-      const covered = groupMeasures.filter((candidate) => candidate.pixelRight > measure.pixelLeft && candidate.pixelLeft < bracketRight - spacing * .25);
-      (covered.length ? covered : [measure]).forEach((candidate) => { candidate.voltaGroup = `${page}-${groupIndex}-${measureIndex}`; });
+      const bracket = voltaBracketRight(measure);
+      if (!bracket) return;
+      const covered = groupMeasures.filter((candidate) => candidate.pixelRight > measure.pixelLeft && candidate.pixelLeft < bracket.right - spacing * .25);
+      (covered.length ? covered : [measure]).forEach((candidate) => {
+        candidate.voltaGroup = `${page}-${groupIndex}-${measureIndex}`;
+        candidate.voltaOpen = bracket.open;
+      });
     });
 
     const nearbyText = textItems.filter((item) => {

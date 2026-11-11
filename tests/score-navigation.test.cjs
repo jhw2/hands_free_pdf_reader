@@ -40,6 +40,18 @@ test('selects first and second endings by repeat pass', () => {
   assert.equal(result.valid, true);
 });
 
+test('skips the long first ending after the second verse in Shaking Time', () => {
+  const measures = Array.from({ length: 99 }, () => ({}));
+  measures[17].repeatStart = true;
+  for (let i = 24; i <= 40; i++) measures[i].volta = [1];
+  measures[40].repeatEnd = true;
+  measures[41].volta = [2];
+  const range = (start, end) => Array.from({ length: end - start + 1 }, (_, i) => start + i - 1);
+  const result = compilePlaybackOrder(measures);
+  assert.equal(result.valid, true);
+  assert.deepEqual(result.order, [...range(1, 41), ...range(18, 24), ...range(42, 99)]);
+});
+
 test('selects first, second, and third endings by repeat pass', () => {
   const result = compilePlaybackOrder([
     { repeatStart: true },
