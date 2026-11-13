@@ -13,6 +13,7 @@ test('count-in uses English words and replaces queued speech rather than accumul
   const window = {
     SpeechSynthesisUtterance: class { constructor(text) { this.text = text; } },
     speechSynthesis: {
+      getVoices: () => [{ name: 'Albert', lang: 'en-US' }, { name: 'Samantha', lang: 'en-US' }],
       cancel: () => { queue.length = 0; },
       speak: utterance => { queue.push(utterance); spoken.push(utterance); },
     },
@@ -24,6 +25,7 @@ test('count-in uses English words and replaces queued speech rather than accumul
   }
   assert.deepEqual(spoken.map(item => item.text), ['One', 'Two', 'Three', 'Four']);
   assert.ok(spoken.every(item => item.lang === 'en-US' && item.rate === 1.2));
+  assert.ok(spoken.every(item => item.voice.name === 'Samantha'));
   speakCountIn(4);
   assert.equal(spoken.length, 4);
   stopCountIn();
@@ -33,13 +35,40 @@ test('count-in uses English words and replaces queued speech rather than accumul
 test('missing or failing speech synthesis does not break countdown or playback', () => {
   for (const window of [{}, {
     SpeechSynthesisUtterance: class {},
-    speechSynthesis: { cancel: () => { throw Error('unavailable'); } },
+    speechSynthesis: { getVoices: () => [{ name: 'Samantha', lang: 'en-US' }], cancel: () => { throw Error('unavailable'); } },
   }, {
     SpeechSynthesisUtterance: class {},
-    speechSynthesis: { cancel: () => {}, speak: () => { throw Error('blocked'); } },
+    speechSynthesis: { getVoices: () => [{ name: 'Samantha', lang: 'en-US' }], cancel: () => {}, speak: () => { throw Error('blocked'); } },
   }]) {
     const { speakCountIn, stopCountIn } = load(window);
     assert.doesNotThrow(() => speakCountIn(0));
     assert.doesNotThrow(stopCountIn);
   }
+});
+
+test('uses another known female English voice when Samantha is not installed', () => {
+  const spoken = [];
+  const voice = { name: 'Microsoft Zira - English (United States)', lang: 'en-US' };
+  const { speakCountIn } = load({
+    SpeechSynthesisUtterance: class {},
+    speechSynthesis: { getVoices: () => [{ name: 'Albert', lang: 'en-US' }, voice], cancel: () => {}, speak: item => spoken.push(item) },
+  });
+  speakCountIn(0);
+  assert.equal(spoken[0].voice, voice);
+});
+
+test('does not fall back to Albert while female voices are absent or still loading', () => {
+  let voices = [];
+  const spoken = [];
+  const { speakCountIn } = load({
+    SpeechSynthesisUtterance: class {},
+    speechSynthesis: { getVoices: () => voices, cancel: () => {}, speak: item => spoken.push(item) },
+  });
+  speakCountIn(0);
+  voices = [{ name: 'Albert', lang: 'en-US' }, { name: 'Samantha', lang: 'fr-FR' }];
+  speakCountIn(1);
+  assert.deepEqual(spoken, []);
+  voices.push({ name: 'Samantha', lang: 'en-US' });
+  speakCountIn(2);
+  assert.equal(spoken[0].voice.name, 'Samantha');
 });

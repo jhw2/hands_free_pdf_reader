@@ -35,8 +35,14 @@ const speakCountIn = (beat: number) => {
   if (!word) return;
   try {
     if (!window.speechSynthesis || typeof window.SpeechSynthesisUtterance !== "function") return;
+    // SpeechSynthesis exposes no gender field, so prefer known English female voices by name.
+    const voices = window.speechSynthesis.getVoices().filter(voice => /^en[-_]/i.test(voice.lang));
+    const voice = ["samantha", "microsoft zira", "microsoft aria", "microsoft jenny", "karen", "moira", "tessa", "victoria", "google uk english female", "google us english"]
+      .map(name => voices.find(voice => voice.name.toLowerCase().includes(name))).find(Boolean);
+    if (!voice) return;
     const utterance = new window.SpeechSynthesisUtterance(word);
-    utterance.lang = "en-US";
+    utterance.voice = voice;
+    utterance.lang = voice.lang;
     utterance.rate = 1.2;
     window.speechSynthesis.cancel();
     window.speechSynthesis.speak(utterance);
@@ -749,6 +755,9 @@ function findMeasures(canvas: HTMLCanvasElement, page: number, textItems: ScoreT
 }
 
 export default function ScoreSyncPage() {
+  useEffect(() => {
+    try { window.speechSynthesis?.getVoices(); } catch { /* Visual countdown remains available. */ }
+  }, []);
   const [fileName, setFileName] = useState("");
   const [pages, setPages] = useState<string[]>([]);
   const [measures, setMeasures] = useState<MeasureBox[]>([]);
