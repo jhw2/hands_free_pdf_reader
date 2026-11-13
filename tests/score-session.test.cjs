@@ -91,17 +91,18 @@ test('delayed YouTube seek samples cannot replace the selected measure during it
   assert.equal(displayedTime, 121, 'normal playback tracking resumes after the countdown');
 });
 
-function seeking({ ready = true, url = 'abcdefghijk', advancing = false } = {}) {
+function seeking({ ready = true, url = 'abcdefghijk', advancing = false, unstarted = false } = {}) {
   const harness = session();
   const { env, state } = harness;
-  let now = 0, position = 0, playerState = 2, muted = false, nextTimer = 0;
+  let now = 0, position = 0, playerState = unstarted ? -1 : 2, muted = false, nextTimer = 0;
   const timers = new Map(), audible = [], commands = [];
   const player = {
     getCurrentTime: () => position, getDuration: () => 240, getPlayerState: () => playerState,
     mute: () => { muted = true; commands.push('mute'); },
     unMute: () => { muted = false; audible.push(position); },
+    loadVideoById: options => { commands.push(['load', options]); unstarted = false; playerState = 1; if (advancing) position = options.startSeconds; },
     seekTo: target => { commands.push(['seek', target]); if (advancing) position = target; },
-    playVideo: () => { playerState = 1; commands.push('play'); if (!muted) audible.push(position); },
+    playVideo: () => { if (!unstarted) playerState = 1; commands.push('play'); if (!muted) audible.push(position); },
     pauseVideo: () => { playerState = 2; commands.push('pause'); },
   };
   Object.assign(env, {
@@ -137,6 +138,16 @@ test('forward and backward jumps hold the target even when the next player sampl
   h.tick(8000);
   assert.ok(h.audible.length && h.audible.every(time => time === 18));
   assert.equal(h.timers.size, 0);
+});
+
+test('selecting a measure loads an unstarted video instead of accepting its optimistic seek timestamp', () => {
+  const h = seeking({ unstarted: true, advancing: true });
+  h.select(30);
+  assert.deepEqual(h.commands, ['mute', ['load', { videoId: 'abcdefghijk', startSeconds: 60 }]]);
+  assert.deepEqual(h.audible, []);
+  h.tick(500);
+  h.tick(4000);
+  assert.ok(h.audible.length && h.audible.every(time => time === 60));
 });
 
 test('a measure jump never unmutes an old position when seeking takes longer than four seconds', () => {

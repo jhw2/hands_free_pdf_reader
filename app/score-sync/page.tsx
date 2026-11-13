@@ -15,7 +15,7 @@ type MeasureBox = NavigationMeasure & {
   voltaGroup?: string;
   voltaOpen?: boolean;
 };
-type YoutubePlayer = { getCurrentTime(): number; getDuration(): number; getPlayerState(): number; playVideo(): void; pauseVideo(): void; seekTo(time: number, allowSeekAhead: boolean): void; mute(): void; unMute(): void; destroy(): void };
+type YoutubePlayer = { getCurrentTime(): number; getDuration(): number; getPlayerState(): number; loadVideoById(options: { videoId: string; startSeconds: number }): void; playVideo(): void; pauseVideo(): void; seekTo(time: number, allowSeekAhead: boolean): void; mute(): void; unMute(): void; destroy(): void };
 
 declare global {
   interface Window {
@@ -1072,8 +1072,8 @@ export default function ScoreSyncPage() {
       setError("선택한 재생 위치로 이동하지 못했어요. 같은 YouTube 링크를 다시 연결해 주세요.");
     };
     try {
-      // Start on the user gesture; pause and refine the seek once the video has actually loaded.
-      player.mute(); player.seekTo(target, true); player.playVideo();
+      // Load the selected video and time explicitly; seekTo can leave an unstarted player unloaded.
+      player.mute(); player.loadVideoById({ videoId, startSeconds: target });
       const timer = window.setInterval(() => {
         if (playerRef.current !== player || countdownTimerRef.current !== timer) return;
         try {
