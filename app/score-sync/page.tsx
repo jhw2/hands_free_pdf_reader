@@ -1062,6 +1062,7 @@ export default function ScoreSyncPage() {
     const startedAt = performance.now();
     let lastSeekAt = startedAt;
     let attempts = 1;
+    let holding = false;
     const failed = () => {
       cancelCountdown();
       desiredPlayingRef.current = false;
@@ -1071,7 +1072,7 @@ export default function ScoreSyncPage() {
       setError("선택한 재생 위치로 이동하지 못했어요. 같은 YouTube 링크를 다시 연결해 주세요.");
     };
     try {
-      // Prime playback on the user gesture, but keep it muted until the seek is verified.
+      // Start on the user gesture; pause and refine the seek once the video has actually loaded.
       player.mute(); player.seekTo(target, true); player.playVideo();
       const timer = window.setInterval(() => {
         if (playerRef.current !== player || countdownTimerRef.current !== timer) return;
@@ -1080,7 +1081,7 @@ export default function ScoreSyncPage() {
           const elapsed = now - startedAt;
           const position = player.getCurrentTime();
           const state = player.getPlayerState();
-          const reached = Math.abs(position - target) <= .15 && (state === 1 || state === 2);
+          const reached = Math.abs(position - target) <= .15 && state === 2;
           if (reached && elapsed >= 4000) {
             cancelCountdown();
             desiredPlayingRef.current = true;
@@ -1089,13 +1090,14 @@ export default function ScoreSyncPage() {
             return;
           }
           if (elapsed >= 12000) { failed(); return; }
-          if (reached) {
-            if (state !== 2) player.pauseVideo();
-          } else {
-            if (attempts < 3 && now - lastSeekAt >= 1000) {
-              player.seekTo(target, true); lastSeekAt = now; attempts++;
+          if (state === 1) {
+            player.pauseVideo();
+            if (!holding) {
+              holding = true;
+              player.seekTo(target, true); lastSeekAt = now;
             }
-            if (state !== 1 && state !== 3) player.playVideo();
+          } else if (!reached && holding && attempts < 3 && now - lastSeekAt >= 1000) {
+            player.seekTo(target, true); lastSeekAt = now; attempts++;
           }
           setCountdown(Math.max(0, 4 - Math.floor(elapsed / 1000)));
         } catch { failed(); }

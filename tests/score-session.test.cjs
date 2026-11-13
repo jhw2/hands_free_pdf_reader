@@ -91,7 +91,7 @@ test('delayed YouTube seek samples cannot replace the selected measure during it
   assert.equal(displayedTime, 121, 'normal playback tracking resumes after the countdown');
 });
 
-function seeking({ ready = true, url = 'abcdefghijk' } = {}) {
+function seeking({ ready = true, url = 'abcdefghijk', advancing = false } = {}) {
   const harness = session();
   const { env, state } = harness;
   let now = 0, position = 0, playerState = 2, muted = false, nextTimer = 0;
@@ -100,7 +100,7 @@ function seeking({ ready = true, url = 'abcdefghijk' } = {}) {
     getCurrentTime: () => position, getDuration: () => 240, getPlayerState: () => playerState,
     mute: () => { muted = true; commands.push('mute'); },
     unMute: () => { muted = false; audible.push(position); },
-    seekTo: target => commands.push(['seek', target]),
+    seekTo: target => { commands.push(['seek', target]); if (advancing) position = target; },
     playVideo: () => { playerState = 1; commands.push('play'); if (!muted) audible.push(position); },
     pauseVideo: () => { playerState = 2; commands.push('pause'); },
   };
@@ -117,8 +117,27 @@ function seeking({ ready = true, url = 'abcdefghijk' } = {}) {
   const editJs = ts.transpileModule(`const edit = ${editUrl};`, { compilerOptions: { target: ts.ScriptTarget.ES2020 } }).outputText;
   const edit = new Function(...Object.keys(env), `${editJs}\nreturn edit;`)(...Object.values(env));
   return { ...harness, select, edit, commands, audible, timers, position: value => { position = value; },
-    tick: at => { now = at; for (const fn of [...timers.values()]) fn(); } };
+    tick: at => {
+      if (advancing && playerState === 1) position += (at - now) / 1000;
+      now = at;
+      for (const fn of [...timers.values()]) fn();
+    } };
 }
+
+test('forward and backward jumps hold the target even when the next player sample arrives late', () => {
+  const h = seeking({ advancing: true });
+  h.select(30);
+  h.tick(500); // A playing seek would already have passed the 150 ms verification window.
+  h.tick(4000);
+  assert.ok(h.audible.length && h.audible.every(time => time === 60));
+  h.audible.length = 0;
+  h.select(9);
+  h.tick(4500);
+  assert.deepEqual(h.audible, []);
+  h.tick(8000);
+  assert.ok(h.audible.length && h.audible.every(time => time === 18));
+  assert.equal(h.timers.size, 0);
+});
 
 test('a measure jump never unmutes an old position when seeking takes longer than four seconds', () => {
   const h = seeking();
@@ -193,6 +212,7 @@ test('replaced countdown callbacks cannot seek or play on a later selection or p
   previous();
   assert.equal(h.commands.length, commandCount);
   h.position(80);
+  h.tick(500);
   h.tick(4000);
   assert.ok(h.audible.length && h.audible.every(time => time === 80));
   h.select(50);
