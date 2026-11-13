@@ -117,7 +117,7 @@ function seeking({ ready = true, url = 'abcdefghijk', advancing = false, unstart
   const select = new Function(...Object.keys(env), `${compiled}\nreturn jump;`)(...Object.values(env));
   const editJs = ts.transpileModule(`const edit = ${editUrl};`, { compilerOptions: { target: ts.ScriptTarget.ES2020 } }).outputText;
   const edit = new Function(...Object.keys(env), `${editJs}\nreturn edit;`)(...Object.values(env));
-  return { ...harness, select, edit, commands, audible, timers, position: value => { position = value; },
+  return { ...harness, select, edit, commands, audible, timers, position: value => { position = value; }, playerState: value => { playerState = value; },
     tick: at => {
       if (advancing && playerState === 1) position += (at - now) / 1000;
       now = at;
@@ -125,29 +125,37 @@ function seeking({ ready = true, url = 'abcdefghijk', advancing = false, unstart
     } };
 }
 
+function confirmPlayback(h, target, at) {
+  h.position(target + .04); h.tick(at + 50);
+  h.position(target + .08); h.tick(at + 100);
+}
+
 test('forward and backward jumps hold the target even when the next player sample arrives late', () => {
   const h = seeking({ advancing: true });
   h.select(30);
   h.tick(500); // A playing seek would already have passed the 150 ms verification window.
   h.tick(4000);
-  assert.ok(h.audible.length && h.audible.every(time => time === 60));
+  confirmPlayback(h, 60, 4000);
+  assert.ok(h.audible.length && h.audible.every(time => Math.abs(time - 60) < .15));
   h.audible.length = 0;
   h.select(9);
   h.tick(4500);
   assert.deepEqual(h.audible, []);
-  h.tick(8000);
-  assert.ok(h.audible.length && h.audible.every(time => time === 18));
+  h.tick(8500);
+  confirmPlayback(h, 18, 8500);
+  assert.ok(h.audible.length && h.audible.every(time => Math.abs(time - 18) < .15));
   assert.equal(h.timers.size, 0);
 });
 
 test('selecting a measure loads an unstarted video instead of accepting its optimistic seek timestamp', () => {
   const h = seeking({ unstarted: true, advancing: true });
   h.select(30);
-  assert.deepEqual(h.commands, ['mute', ['load', { videoId: 'abcdefghijk', startSeconds: 60 }]]);
+  assert.deepEqual(h.commands, ['mute', ['load', { videoId: 'abcdefghijk', startSeconds: 59.5 }]]);
   assert.deepEqual(h.audible, []);
   h.tick(500);
   h.tick(4000);
-  assert.ok(h.audible.length && h.audible.every(time => time === 60));
+  confirmPlayback(h, 60, 4000);
+  assert.ok(h.audible.length && h.audible.every(time => Math.abs(time - 60) < .15));
 });
 
 test('a measure jump never unmutes an old position when seeking takes longer than four seconds', () => {
@@ -156,8 +164,9 @@ test('a measure jump never unmutes an old position when seeking takes longer tha
   h.tick(4000);
   assert.deepEqual(h.audible, [], 'old position zero must remain muted');
   assert.ok(h.timers.size, 'keep verifying the pending seek');
-  h.position(60);
+  h.position(59.5);
   h.tick(5000);
+  confirmPlayback(h, 60, 5000);
   assert.ok(h.audible.length);
   assert.ok(h.audible.every(time => Math.abs(time - 60) <= .15));
   assert.equal(h.timers.size, 0);
@@ -166,13 +175,15 @@ test('a measure jump never unmutes an old position when seeking takes longer tha
 test('a ready target waits for the countdown, then plays without starting another asynchronous seek', () => {
   const h = seeking();
   h.select(30);
-  h.position(60);
+  h.position(59.5);
   h.tick(500);
   assert.deepEqual(h.audible, []);
   const seeks = h.commands.filter(command => Array.isArray(command)).length;
   h.tick(4000);
+  assert.deepEqual(h.audible, [], 'a paused timestamp is not playback confirmation');
+  confirmPlayback(h, 60, 4000);
   assert.equal(h.commands.filter(command => Array.isArray(command)).length, seeks);
-  assert.ok(h.audible.every(time => time === 60));
+  assert.ok(h.audible.length && h.audible.every(time => Math.abs(time - 60) < .15));
 });
 
 test('unready players and unconnected edited links cannot play the previous video', () => {
@@ -203,15 +214,18 @@ test('a measure beyond the video duration is rejected before playback', () => {
 });
 
 test('editing the video link cancels a pending jump before the old video can unmute', () => {
-  const h = seeking();
-  h.select(30);
-  h.edit('lmnopqrstuv');
-  h.position(60);
-  h.tick(5000);
-  assert.equal(h.timers.size, 0);
-  assert.deepEqual(h.audible, []);
-  assert.equal(h.env.desiredPlayingRef.current, false);
-  assert.equal(h.commands.at(-1), 'pause');
+  for (const resuming of [false, true]) {
+    const h = seeking();
+    h.select(30);
+    if (resuming) { h.position(59.5); h.tick(500); h.tick(3500); }
+    h.edit('lmnopqrstuv');
+    h.position(60.05);
+    h.tick(5000);
+    assert.equal(h.timers.size, 0);
+    assert.deepEqual(h.audible, []);
+    assert.equal(h.env.desiredPlayingRef.current, false);
+    assert.equal(h.commands.at(-1), 'pause');
+  }
 });
 
 test('replaced countdown callbacks cannot seek or play on a later selection or player', () => {
@@ -222,13 +236,58 @@ test('replaced countdown callbacks cannot seek or play on a later selection or p
   const commandCount = h.commands.length;
   previous();
   assert.equal(h.commands.length, commandCount);
-  h.position(80);
+  h.position(79.5);
   h.tick(500);
   h.tick(4000);
-  assert.ok(h.audible.length && h.audible.every(time => time === 80));
+  confirmPlayback(h, 80, 4000);
+  assert.ok(h.audible.length && h.audible.every(time => Math.abs(time - 80) < .15));
   h.select(50);
   h.env.playerRef.current = {};
   const beforeReplacement = h.commands.length;
   h.tick(8000);
   assert.equal(h.commands.length, beforeReplacement);
+});
+
+
+test('a first resume that jumps to the end and then zero stays muted until the selected passage actually plays', () => {
+  const h = seeking();
+  h.select(30);
+  h.position(59.5); h.tick(500); h.tick(4000);
+  assert.deepEqual(h.audible, []);
+  h.position(240); h.playerState(0); h.tick(4050);
+  assert.deepEqual(h.audible, []);
+  assert.equal(h.state.Time, 60, 'keep the selected measure while playback is being corrected');
+  assert.equal(h.env.desiredPlayingRef.current, false, 'ordinary stall recovery must not compete with the pending jump');
+  h.position(0); h.tick(4100);
+  assert.deepEqual(h.audible, []);
+  const seeks = h.commands.filter(command => Array.isArray(command) && command[0] === 'seek').length;
+  h.tick(5050);
+  assert.equal(h.commands.filter(command => Array.isArray(command) && command[0] === 'seek').length, seeks + 1);
+  assert.deepEqual(h.commands.at(-2), ['seek', 59.5]);
+  confirmPlayback(h, 60, 5100);
+  assert.ok(h.audible.length && h.audible.every(time => Math.abs(time - 60) < .15));
+  assert.equal(h.timers.size, 0);
+  assert.equal(h.env.desiredPlayingRef.current, true);
+});
+
+test('a frozen optimistic timestamp cannot release audio even if the player reports playing', () => {
+  const h = seeking();
+  h.select(30);
+  h.position(59.5); h.tick(500); h.tick(4000);
+  h.tick(4050); h.tick(4100); h.tick(5000);
+  assert.deepEqual(h.audible, []);
+  assert.ok(h.timers.size);
+  h.tick(13000);
+  assert.deepEqual(h.audible, []);
+  assert.equal(h.timers.size, 0);
+  assert.ok(h.state.Error);
+});
+
+
+test('silent lead-in verifies playback before the selected measure instead of consuming its first beat', () => {
+  const h = seeking({ advancing: true });
+  h.select(30);
+  for (let at = 50; at <= 4500; at += 50) h.tick(at);
+  assert.ok(h.audible.length && h.audible.every(time => time >= 60 && time < 60.1));
+  assert.equal(h.timers.size, 0);
 });

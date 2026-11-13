@@ -1049,6 +1049,8 @@ export default function ScoreSyncPage() {
     const nextOccurrence = playbackOrder.findIndex((measure, step) => step >= currentStep && measure === index);
     const targetStep = nextOccurrence >= 0 ? nextOccurrence : Math.max(0, playbackOrder.indexOf(index));
     const target = offset + targetStep * secondsPerMeasure;
+    const leadIn = Math.min(.5, target);
+    const seekTarget = target - leadIn;
     const videoDuration = player.getDuration();
     if (videoDuration > 0 && target >= videoDuration) { setError("선택한 마디가 영상 길이를 벗어나요. BPM과 시작 시간을 확인해 주세요."); return; }
     cancelCountdown();
@@ -1063,6 +1065,8 @@ export default function ScoreSyncPage() {
     let lastSeekAt = startedAt;
     let attempts = 1;
     let holding = false;
+    let resuming = false;
+    let resumeSample: { time: number; at: number } | null = null;
     const failed = () => {
       cancelCountdown();
       desiredPlayingRef.current = false;
@@ -1073,7 +1077,7 @@ export default function ScoreSyncPage() {
     };
     try {
       // Load the selected video and time explicitly; seekTo can leave an unstarted player unloaded.
-      player.mute(); player.loadVideoById({ videoId, startSeconds: target });
+      player.mute(); player.loadVideoById({ videoId, startSeconds: seekTarget });
       const timer = window.setInterval(() => {
         if (playerRef.current !== player || countdownTimerRef.current !== timer) return;
         try {
@@ -1081,27 +1085,52 @@ export default function ScoreSyncPage() {
           const elapsed = now - startedAt;
           const position = player.getCurrentTime();
           const state = player.getPlayerState();
-          const reached = Math.abs(position - target) <= .15 && state === 2;
-          if (reached && elapsed >= 4000) {
-            cancelCountdown();
-            desiredPlayingRef.current = true;
-            lastProgressRef.current = { time: position, changedAt: now };
-            player.unMute(); player.playVideo();
+          if (elapsed >= 12000) { failed(); return; }
+          if (resuming) {
+            // A paused timestamp can be optimistic. Verify advancing playback before releasing audio or tracking.
+            if (state === 1 && position >= seekTarget && position <= target + .15) {
+              if (resumeSample && position > resumeSample.time + .015
+                && position - resumeSample.time <= (now - resumeSample.at) / 1000 + .1
+                && position >= target && elapsed >= 4000) {
+                cancelCountdown();
+                desiredPlayingRef.current = true;
+                lastProgressRef.current = { time: position, changedAt: now };
+                setTime(position);
+                player.unMute();
+                return;
+              }
+              resumeSample = { time: position, at: now };
+            } else {
+              resumeSample = null;
+              if (state !== 3 && attempts < 3 && now - lastSeekAt >= 1000) {
+                player.seekTo(seekTarget, true); player.playVideo(); lastSeekAt = now; attempts++;
+              }
+            }
+            setCountdown(Math.max(0, 4 - Math.floor(elapsed / 1000)));
             return;
           }
-          if (elapsed >= 12000) { failed(); return; }
+          const reached = Math.abs(position - seekTarget) <= .15 && state === 2;
+          // Verify playback in a silent lead-in so checking it does not consume the measure's first beat.
+          if (reached && elapsed >= 4000 - leadIn * 1000) {
+            resuming = true;
+            lastSeekAt = now;
+            attempts = 0;
+            setCountdown(Math.max(0, 4 - Math.floor(elapsed / 1000)));
+            player.playVideo();
+            return;
+          }
           if (state === 1) {
             player.pauseVideo();
             if (!holding) {
               holding = true;
-              player.seekTo(target, true); lastSeekAt = now;
+              player.seekTo(seekTarget, true); lastSeekAt = now;
             }
           } else if (!reached && holding && attempts < 3 && now - lastSeekAt >= 1000) {
-            player.seekTo(target, true); lastSeekAt = now; attempts++;
+            player.seekTo(seekTarget, true); lastSeekAt = now; attempts++;
           }
           setCountdown(Math.max(0, 4 - Math.floor(elapsed / 1000)));
         } catch { failed(); }
-      }, 100);
+      }, 50);
       countdownTimerRef.current = timer;
     } catch { failed(); }
   };
