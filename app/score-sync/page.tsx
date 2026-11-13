@@ -139,12 +139,13 @@ const storeMetadata = (changes: StoredMetadata) => {
 const parseNavigationText = (value: string) => {
   const text = value.normalize("NFKC").replace(/\s+/g, " ").trim();
   const mark: NavigationMeasure & { repeatCount?: number } = {};
-  const isDs = /(?:\bD\s*\.?\s*S\s*\.?\b|\bDal\s+Segno\b|달\s*세뇨)/i.test(text);
-  const isDc = /(?:\bD\s*\.?\s*C\s*\.?\b|\bDa\s+Capo\b|다\s*카포)/i.test(text);
-  if (isDs || isDc) {
-    mark.jump = isDs ? "ds" : "dc";
-    if (/(?:\bal\s+Coda\b|알\s*코다)/i.test(text)) mark.jumpMode = "coda";
-    else if (/(?:\bal\s+Fine\b|알\s*피네)/i.test(text)) mark.jumpMode = "fine";
+  // Match a whole instruction: guitar techniques such as "C&D C" are not D.C.
+  const jump = text.match(/^\(?\s*(D\s*\.?\s*[SC]\s*\.?|Dal\s+Segno|Da\s+Capo|달\s*세뇨|다\s*카포)(?:\s*(?:al|알)\s*(Coda|Fine|코다|피네))?\s*\)?[.!]?$/i);
+  if (jump) {
+    const instruction = jump[1].replace(/[\s.]/g, "").toLowerCase();
+    mark.jump = ["ds", "dalsegno", "달세뇨"].includes(instruction) ? "ds" : "dc";
+    if (/^(?:Coda|코다)$/i.test(jump[2] ?? "")) mark.jumpMode = "coda";
+    else if (/^(?:Fine|피네)$/i.test(jump[2] ?? "")) mark.jumpMode = "fine";
   } else if (/(?:\bTo\s+Coda\b|코다로)/i.test(text)) mark.toCoda = true;
 
   const raw = value.trim();
@@ -761,6 +762,12 @@ export default function ScoreSyncPage() {
   const lastSelectedTargetRef = useRef(0);
   const pdfLoadVersionRef = useRef(0);
 
+  const cancelCountdown = () => {
+    if (countdownTimerRef.current !== null) window.clearInterval(countdownTimerRef.current);
+    countdownTimerRef.current = null;
+    setCountdown(null); setCountdownMeasure(null);
+  };
+
   const navigation = useMemo(() => compilePlaybackOrder(measures), [measures]);
   const playbackOrder = useMemo(() => navigation.valid && navigation.order.length
     ? navigation.order
@@ -853,6 +860,7 @@ export default function ScoreSyncPage() {
           onError: (event: { data: number }) => {
             if (disposed) return;
             const playbackPending = desiredPlayingRef.current || countdownTimerRef.current !== null;
+            cancelCountdown();
             playerReadyRef.current = false;
             desiredPlayingRef.current = false;
             setPlayerReady(false);
@@ -869,6 +877,7 @@ export default function ScoreSyncPage() {
           },
           onAutoplayBlocked: () => {
             if (disposed) return;
+            cancelCountdown();
             desiredPlayingRef.current = false;
             setPlaying(false);
             setError("브라우저가 4초 후 자동 재생을 차단했어요. 위의 재생 버튼을 한 번 눌러 주세요.");
@@ -900,22 +909,17 @@ export default function ScoreSyncPage() {
       if (playerRef.current === createdPlayer) playerRef.current = null;
       createdPlayer?.destroy();
       container.replaceChildren();
-      if (countdownTimerRef.current !== null) {
-        window.clearInterval(countdownTimerRef.current);
-        countdownTimerRef.current = null;
-      }
+      cancelCountdown();
     };
   }, [playerGeneration, videoId]);
 
   const disconnectYoutube = () => {
-    if (countdownTimerRef.current !== null) window.clearInterval(countdownTimerRef.current);
-    countdownTimerRef.current = null;
+    cancelCountdown();
     desiredPlayingRef.current = false;
     playerReadyRef.current = false;
     lastSelectedTargetRef.current = 0;
     youtubeRetryRef.current = 0;
     setUrl(""); setVideoId(null); setPlayerReady(false); setPlaying(false);
-    setCountdown(null); setCountdownMeasure(null);
     setTime(0); setOffset(0); setDuration(240); setError("");
     try { storeMetadata({ youtubeUrl: "" }); }
     catch { setError("이전 YouTube 링크를 저장 공간에서 지우지 못했어요."); }
@@ -1011,6 +1015,10 @@ export default function ScoreSyncPage() {
   const attachYoutube = () => {
     const id = getVideoId(url);
     if (!id) { setError("올바른 유튜브 링크를 입력해 주세요."); return; }
+    cancelCountdown();
+    playerReadyRef.current = false;
+    desiredPlayingRef.current = false;
+    setPlayerReady(false); setPlaying(false);
     setError("");
     setTime(0);
     setDuration(240);
@@ -1022,52 +1030,88 @@ export default function ScoreSyncPage() {
     setPlayerGeneration((generation) => generation + 1);
   };
 
+  const updateYoutubeUrl = (value: string) => {
+    if (!value) { disconnectYoutube(); return; }
+    setUrl(value);
+    if (getVideoId(value) === videoId) return;
+    cancelCountdown();
+    desiredPlayingRef.current = false;
+    if (playerReadyRef.current) playerRef.current?.pauseVideo();
+    setPlaying(false);
+  };
+
   const jumpToMeasure = (index: number) => {
-    if (!playerRef.current) { setError("먼저 YouTube 링크를 연결해 주세요."); return; }
-    if (countdownTimerRef.current !== null) window.clearInterval(countdownTimerRef.current);
+    if (!videoId || getVideoId(url) !== videoId) { setError("입력한 YouTube 링크의 연결 버튼을 먼저 눌러 주세요."); return; }
+    const player = playerRef.current;
+    if (!player || !playerReadyRef.current) { setError("YouTube 연결이 준비된 뒤 마디를 다시 눌러 주세요."); return; }
     const secondsPerMeasure = (60 / Math.max(1, bpm)) * beatsPerMeasure;
     const currentStep = Math.max(0, Math.floor(Math.max(0, time - offset) / secondsPerMeasure));
     const nextOccurrence = playbackOrder.findIndex((measure, step) => step >= currentStep && measure === index);
     const targetStep = nextOccurrence >= 0 ? nextOccurrence : Math.max(0, playbackOrder.indexOf(index));
     const target = offset + targetStep * secondsPerMeasure;
+    const videoDuration = player.getDuration();
+    if (videoDuration > 0 && target >= videoDuration) { setError("선택한 마디가 영상 길이를 벗어나요. BPM과 시작 시간을 확인해 주세요."); return; }
+    cancelCountdown();
     desiredPlayingRef.current = false;
     lastSelectedTargetRef.current = target;
-    // Prime playback while this click still carries browser user activation.
-    playerRef.current.mute();
-    playerRef.current.seekTo(target, true);
-    playerRef.current.playVideo();
-    window.setTimeout(() => playerRef.current?.pauseVideo(), 80);
     setTime(target);
     setPlaying(false);
     setError("");
     setCountdown(4);
     setCountdownMeasure(index);
     const startedAt = performance.now();
-    countdownTimerRef.current = window.setInterval(() => {
-      const elapsed = performance.now() - startedAt;
-      if (elapsed >= 4000) {
-        if (countdownTimerRef.current !== null) window.clearInterval(countdownTimerRef.current);
-        countdownTimerRef.current = null;
-        setCountdown(null);
-        setCountdownMeasure(null);
-        playerRef.current?.seekTo(target, true);
-        playerRef.current?.unMute();
-        desiredPlayingRef.current = true;
-        lastProgressRef.current = { time: target, changedAt: performance.now() };
-        playerRef.current?.playVideo();
-        return;
-      }
-      setCountdown(4 - Math.floor(elapsed / 1000));
-    }, 100);
+    let lastSeekAt = startedAt;
+    let attempts = 1;
+    const failed = () => {
+      cancelCountdown();
+      desiredPlayingRef.current = false;
+      playerReadyRef.current = false;
+      setPlayerReady(false); setPlaying(false);
+      try { player.pauseVideo(); } catch { /* Keep the failed player muted. */ }
+      setError("선택한 재생 위치로 이동하지 못했어요. 같은 YouTube 링크를 다시 연결해 주세요.");
+    };
+    try {
+      // Prime playback on the user gesture, but keep it muted until the seek is verified.
+      player.mute(); player.seekTo(target, true); player.playVideo();
+      const timer = window.setInterval(() => {
+        if (playerRef.current !== player || countdownTimerRef.current !== timer) return;
+        try {
+          const now = performance.now();
+          const elapsed = now - startedAt;
+          const position = player.getCurrentTime();
+          const state = player.getPlayerState();
+          const reached = Math.abs(position - target) <= .15 && (state === 1 || state === 2);
+          if (reached && elapsed >= 4000) {
+            cancelCountdown();
+            desiredPlayingRef.current = true;
+            lastProgressRef.current = { time: position, changedAt: now };
+            player.unMute(); player.playVideo();
+            return;
+          }
+          if (elapsed >= 12000) { failed(); return; }
+          if (reached) {
+            if (state !== 2) player.pauseVideo();
+          } else {
+            if (attempts < 3 && now - lastSeekAt >= 1000) {
+              player.seekTo(target, true); lastSeekAt = now; attempts++;
+            }
+            if (state !== 1 && state !== 3) player.playVideo();
+          }
+          setCountdown(Math.max(0, 4 - Math.floor(elapsed / 1000)));
+        } catch { failed(); }
+      }, 100);
+      countdownTimerRef.current = timer;
+    } catch { failed(); }
   };
 
   const togglePlayback = () => {
-    if (!playerRef.current) return;
+    if (!playerRef.current || !playerReadyRef.current || getVideoId(url) !== videoId) return;
     if (countdownTimerRef.current !== null) {
-      window.clearInterval(countdownTimerRef.current);
-      countdownTimerRef.current = null;
-      setCountdown(null);
-      setCountdownMeasure(null);
+      cancelCountdown();
+      desiredPlayingRef.current = false;
+      playerRef.current.pauseVideo();
+      setPlaying(false);
+      return;
     }
     if (playing) {
       desiredPlayingRef.current = false;
@@ -1077,6 +1121,7 @@ export default function ScoreSyncPage() {
       const currentTime = playerRef.current.getCurrentTime();
       if (playerRef.current.getPlayerState() === 0) playerRef.current.seekTo(lastSelectedTargetRef.current, true);
       lastProgressRef.current = { time: currentTime, changedAt: performance.now() };
+      playerRef.current.unMute();
       playerRef.current.playVideo();
     }
   };
@@ -1096,8 +1141,8 @@ export default function ScoreSyncPage() {
   return <main className={styles.shell}>
     <header className={styles.toolbar}>
       <label className={styles.fileButton}>{fileName || "PDF 열기"}<input type="file" accept="application/pdf" onChange={loadPdf}/></label>
-      <div className={styles.youtubeInput}><input type="search" inputMode="url" autoComplete="off" autoCapitalize="none" spellCheck={false} value={url} onChange={(e) => e.target.value ? setUrl(e.target.value) : disconnectYoutube()} onKeyDown={(e) => e.key === "Enter" && attachYoutube()} placeholder="YouTube 링크" aria-label="유튜브 링크"/><button onClick={attachYoutube}>연결</button></div>
-      <button className={styles.playButton} onClick={togglePlayback} disabled={!playerReady} aria-label={playing ? "일시 정지" : "재생"}>{playing ? "Ⅱ" : "▶"}</button>
+      <div className={styles.youtubeInput}><input type="search" inputMode="url" autoComplete="off" autoCapitalize="none" spellCheck={false} value={url} onChange={(e) => updateYoutubeUrl(e.target.value)} onKeyDown={(e) => e.key === "Enter" && attachYoutube()} placeholder="YouTube 링크" aria-label="유튜브 링크"/><button onClick={attachYoutube}>연결</button></div>
+      <button className={styles.playButton} onClick={togglePlayback} disabled={!playerReady || getVideoId(url) !== videoId} aria-label={playing ? "일시 정지" : "재생"}>{playing ? "Ⅱ" : "▶"}</button>
       <label className={styles.tempoControl}><span>{tempoDetected ? "감지 BPM" : "BPM"}</span><input type="number" min="30" max="300" value={bpm} onChange={(event) => updateBpm(Number(event.target.value))}/></label>
       <label className={styles.meterControl}><span>박자</span><select value={beatsPerMeasure} onChange={(event) => updateBeatsPerMeasure(Number(event.target.value))}><option value={2}>2박</option><option value={3}>3박</option><option value={4}>4박</option><option value={6}>6박</option></select></label>
       <div className={styles.progress}><span style={{ width: `${Math.min(100, time / duration * 100)}%` }}/></div>
@@ -1109,7 +1154,7 @@ export default function ScoreSyncPage() {
     {!error && measures.length > 0 && !navigation.valid && <p className={styles.warning} role="status">반복 경로를 확정하지 못해 악보 순서대로 표시합니다.</p>}
     <section className={styles.scorePanel}>
       <div className={styles.pages}>
-        {loading ? <div className={styles.empty}><span className={styles.spinner}/><h3>마디선을 찾고 있어요</h3></div> : !pages.length ? <div className={styles.empty}><div className={styles.note}>♩</div><h3>PDF 악보를 열어주세요</h3></div> : pages.map((src, pageIndex) => <div className={styles.page} key={src}><img src={src} alt={`악보 ${pageIndex + 1}페이지`}/>{measures.map((box, index) => box.page === pageIndex + 1 && <button key={box.id} data-current={index === activeIndex ? "true" : undefined} onClick={() => jumpToMeasure(index)} className={`${styles.system} ${index === activeIndex ? styles.active : ""}`} style={{ top: `${box.top}%`, left: `${box.left}%`, width: `${box.width}%`, height: `${box.height}%` }} aria-label={`${index + 1}번 마디로 이동`}><span aria-hidden="true">{index + 1}</span>{countdown !== null && countdownMeasure === index ? <b className={styles.measureCountdown} role="timer" aria-live="assertive">{countdown}</b> : null}</button>)}</div>)}
+        {loading ? <div className={styles.empty}><span className={styles.spinner}/><h3>마디선을 찾고 있어요</h3></div> : !pages.length ? <div className={styles.empty}><div className={styles.note}>♩</div><h3>PDF 악보를 열어주세요</h3></div> : pages.map((src, pageIndex) => <div className={styles.page} key={src}><img src={src} alt={`악보 ${pageIndex + 1}페이지`}/>{measures.map((box, index) => box.page === pageIndex + 1 && <button key={box.id} data-current={index === activeIndex ? "true" : undefined} onClick={() => jumpToMeasure(index)} className={`${styles.system} ${index === activeIndex ? styles.active : ""}`} style={{ top: `${box.top}%`, left: `${box.left}%`, width: `${box.width}%`, height: `${box.height}%` }} aria-label={`${index + 1}번 마디로 이동`}><span aria-hidden="true">{index + 1}</span>{countdown !== null && countdownMeasure === index ? <b className={styles.measureCountdown} role="timer" aria-live="assertive" aria-label={countdown === 0 ? "재생 위치 확인 중" : undefined}>{countdown === 0 ? "…" : countdown}</b> : null}</button>)}</div>)}
         {videoId ? <div className={styles.miniPlayer}><div ref={playerHostRef}/></div> : null}
       </div>
     </section>

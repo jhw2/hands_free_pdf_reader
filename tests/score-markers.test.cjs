@@ -76,6 +76,18 @@ test('accepts standalone repeat counts but rejects part-only labels', () => {
   assert.equal(parseNavigationText('<2x Only>').repeatCount, undefined);
 });
 
+test('guitar technique labels containing D C do not create da capo jumps', () => {
+  for (const text of ['C&D C', 'U&D C', 'C&D C U&D C', 'QC C&D C', 'U&D C C', 'Practice D.C. slowly']) {
+    assert.equal(parseNavigationText(text).jump, undefined, text);
+  }
+  for (const text of ['D.C.', 'D C', 'Da Capo', '(D.C. al Fine)', '다 카포 알 피네']) {
+    assert.equal(parseNavigationText(text).jump, 'dc', text);
+  }
+  for (const text of ['D.S.', 'D S', 'Dal Segno', '(D.S. al Coda)', '달 세뇨 알 코다']) {
+    assert.equal(parseNavigationText(text).jump, 'ds', text);
+  }
+});
+
 test('numbers consecutive volta brackets from their repeat structure', () => {
   const measures = [
     { voltaGroup: 'first' },
