@@ -26,7 +26,8 @@
 .pages { height: 100%; overflow: auto; padding: 18px; scroll-behavior: smooth; }
 .page { position: relative; width: min(1200px, calc(100vw - 36px)); margin: 0 auto 18px; background: white; box-shadow: 0 6px 24px #0007; }
 .page img { display: block; width: 100%; }
-.system { position: absolute; padding: 0; border: 1px solid transparent; border-radius: 1px; background: transparent; cursor: pointer; transition: background .12s, border-color .12s; }
+/* Score hit areas must keep their measured height instead of the global button minimum. */
+.system { position: absolute; min-height: 0; padding: 0; border: 1px solid transparent; border-radius: 1px; background: transparent; cursor: pointer; transition: background .12s, border-color .12s; }
 .system:hover { border-color: transparent; background: transparent; }
 @media (hover: hover) and (pointer: fine) { .system:hover { border-color: #e84d37; background: #e84d3718; } }
 .system span { position: absolute; left: 1px; bottom: calc(100% + 2px); color: #8b877d; font: 9px/1 monospace; pointer-events: none; }
