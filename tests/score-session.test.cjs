@@ -27,6 +27,7 @@ function session(storageFails = false) {
   const cleared = [];
   const metadata = { youtubeUrl: 'https://youtu.be/abcdefghijk', fileName: 'score.pdf' };
   const env = {
+    stopCountIn: () => {}, speakCountIn: () => {},
     countdownTimerRef: { current: 42 }, desiredPlayingRef: { current: true }, playerReadyRef: { current: true },
     lastSelectedTargetRef: { current: 90 }, youtubeRetryRef: { current: 1 },
     window: { clearInterval: id => cleared.push(id) },
@@ -96,6 +97,7 @@ function seeking({ ready = true, url = 'abcdefghijk', advancing = false, unstart
   const { env, state } = harness;
   let now = 0, position = 0, playerState = unstarted ? -1 : 2, muted = false, nextTimer = 0;
   const timers = new Map(), audible = [], commands = [];
+  const speech = [];
   const player = {
     getCurrentTime: () => position, getDuration: () => 240, getPlayerState: () => playerState,
     mute: () => { muted = true; commands.push('mute'); },
@@ -106,6 +108,7 @@ function seeking({ ready = true, url = 'abcdefghijk', advancing = false, unstart
     pauseVideo: () => { playerState = 2; commands.push('pause'); },
   };
   Object.assign(env, {
+    speakCountIn: beat => speech.push(beat), stopCountIn: () => speech.push('stop'),
     playerRef: { current: player }, playerReadyRef: { current: ready }, countdownTimerRef: { current: null },
     videoId: 'abcdefghijk', url, getVideoId: value => value,
     bpm: 120, beatsPerMeasure: 4, time: 0, offset: 0, playbackOrder: Array.from({ length: 150 }, (_, i) => i),
@@ -117,13 +120,37 @@ function seeking({ ready = true, url = 'abcdefghijk', advancing = false, unstart
   const select = new Function(...Object.keys(env), `${compiled}\nreturn jump;`)(...Object.values(env));
   const editJs = ts.transpileModule(`const edit = ${editUrl};`, { compilerOptions: { target: ts.ScriptTarget.ES2020 } }).outputText;
   const edit = new Function(...Object.keys(env), `${editJs}\nreturn edit;`)(...Object.values(env));
-  return { ...harness, select, edit, commands, audible, timers, position: value => { position = value; }, playerState: value => { playerState = value; },
+  return { ...harness, select, edit, commands, audible, timers, speech, position: value => { position = value; }, playerState: value => { playerState = value; },
     tick: at => {
       if (advancing && playerState === 1) position += (at - now) / 1000;
       now = at;
       for (const fn of [...timers.values()]) fn();
     } };
 }
+
+test('count-in speaks one two three four once per second and stops before playback or on cancellation', () => {
+  const h = seeking();
+  h.select(30);
+  for (let at = 50; at <= 5000; at += 50) h.tick(at);
+  assert.deepEqual(h.speech.filter(item => typeof item === 'number'), [0, 1, 2, 3]);
+  assert.equal(h.speech.at(-1), 'stop');
+  h.select(40);
+  assert.deepEqual(h.speech.slice(-2), ['stop', 0]);
+  h.edit('lmnopqrstuv');
+  const count = h.speech.length;
+  h.tick(6000);
+  assert.equal(h.speech.length, count);
+  assert.equal(h.speech.at(-1), 'stop');
+});
+
+test('late countdown ticks skip expired spoken numbers instead of queuing a burst', () => {
+  const h = seeking();
+  h.select(30);
+  h.tick(2500);
+  h.tick(5000);
+  assert.deepEqual(h.speech.filter(item => typeof item === 'number'), [0, 2]);
+  assert.equal(h.speech.at(-1), 'stop');
+});
 
 function confirmPlayback(h, target, at) {
   h.position(target + .04); h.tick(at + 50);

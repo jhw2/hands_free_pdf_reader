@@ -26,6 +26,23 @@ declare global {
 
 const YOUTUBE_VIDEO_ID = /^[A-Za-z0-9_-]{11}$/;
 
+const stopCountIn = () => {
+  try { window.speechSynthesis?.cancel(); } catch { /* Speech must not interrupt playback controls. */ }
+};
+
+const speakCountIn = (beat: number) => {
+  const word = ["One", "Two", "Three", "Four"][beat];
+  if (!word) return;
+  try {
+    if (!window.speechSynthesis || typeof window.SpeechSynthesisUtterance !== "function") return;
+    const utterance = new window.SpeechSynthesisUtterance(word);
+    utterance.lang = "en-US";
+    utterance.rate = 1.2;
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(utterance);
+  } catch { /* Keep the visual countdown when speech is unavailable. */ }
+};
+
 const getVideoId = (value: string) => {
   const trimmed = value.trim();
   if (YOUTUBE_VIDEO_ID.test(trimmed)) return trimmed;
@@ -763,6 +780,7 @@ export default function ScoreSyncPage() {
   const pdfLoadVersionRef = useRef(0);
 
   const cancelCountdown = () => {
+    stopCountIn();
     if (countdownTimerRef.current !== null) window.clearInterval(countdownTimerRef.current);
     countdownTimerRef.current = null;
     setCountdown(null); setCountdownMeasure(null);
@@ -1066,6 +1084,7 @@ export default function ScoreSyncPage() {
     let attempts = 1;
     let holding = false;
     let resuming = false;
+    let spokenBeat = 0;
     let resumeSample: { time: number; at: number } | null = null;
     const failed = () => {
       cancelCountdown();
@@ -1078,11 +1097,18 @@ export default function ScoreSyncPage() {
     try {
       // Load the selected video and time explicitly; seekTo can leave an unstarted player unloaded.
       player.mute(); player.loadVideoById({ videoId, startSeconds: seekTarget });
+      speakCountIn(0);
       const timer = window.setInterval(() => {
         if (playerRef.current !== player || countdownTimerRef.current !== timer) return;
         try {
           const now = performance.now();
           const elapsed = now - startedAt;
+          const beat = Math.min(4, Math.floor(elapsed / 1000));
+          if (beat !== spokenBeat) {
+            spokenBeat = beat;
+            if (beat < 4) speakCountIn(beat);
+            else stopCountIn();
+          }
           const position = player.getCurrentTime();
           const state = player.getPlayerState();
           if (elapsed >= 12000) { failed(); return; }
