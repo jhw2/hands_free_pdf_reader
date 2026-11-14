@@ -34,7 +34,11 @@ const WebSocket = require('next/dist/compiled/ws');
       if (result.exceptionDetails) throw Error(JSON.stringify(result.exceptionDetails));
       return result.result.value;
     };
-    await evaluate(`new Promise(resolve => { if (document.readyState === 'complete') resolve(); else addEventListener('load',resolve,{once:true}); })`);
+    const deadline = Date.now() + 20000;
+    while (!await evaluate(`location.origin === ${JSON.stringify(new URL(appOrigin).origin)} && document.readyState === 'complete'`).catch(() => false)) {
+      if (Date.now() >= deadline) throw Error('Local test page did not finish loading.');
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
     const name = `score-library-test-${Date.now()}`;
     const key = `${name}:metadata`;
     const source = fs.readFileSync(require.resolve('../app/score-sync/library.ts'), 'utf8').replaceAll('score-sync-cache', name).replaceAll('score-sync:last-session', key);
@@ -60,10 +64,12 @@ const WebSocket = require('next/dist/compiled/ws');
         const first=data.songs[0];
         expect(first.bpm===115 && first.offset===2.5 && first.youtubeUrl.includes('dQdc9DjtgQQ') && await first.blob.text()==='legacy PDF','migration keeps PDF and settings together');
         const second={...first,id:'second',fileName:'second.pdf',blob:new Blob(['second PDF']),youtubeUrl:'',bpm:92,offset:0};
+        second.navigationEdits={measureIds:['m1','m2'],markers:[{measure:1,kind:'repeatStart'},{measure:2,kind:'repeatEnd',count:3}]};
         await lib.saveSong(second,true);
         await Promise.all([lib.saveSong({...first,bpm:116}),lib.saveSong({...first,bpm:117,offset:3})]);
         data=await lib.readLibrary();
         expect(data.songs.length===2 && data.activeId==='second','save second without replacing first');
+        expect(data.songs.find(song=>song.id==='second').navigationEdits.markers[1].count===3 && !data.songs.find(song=>song.id===first.id).navigationEdits,'repeat corrections stay with their score');
         expect(data.songs.find(song=>song.id===first.id).bpm===117 && data.songs.find(song=>song.id==='second').bpm===92,'ordered writes and separate settings');
         await lib.activateSong(first.id);
         expect((await lib.readLibrary()).activeId===first.id,'remember selected song');

@@ -50,6 +50,24 @@ function addStaff(geometry, top, spacing, count, edges) {
   return lines;
 }
 
+test('D.S. al Fine finds the tall Maestro segno above its staff and returns to Fine', () => {
+  const geometry = { horizontal: [], vertical: [] };
+  const edges = [72, 410, 654, 898, 1142];
+  addStaff(geometry, 540, 9.24, 5, edges);
+  addStaff(geometry, 677, 9.24, 5, edges);
+  const segno = { text: '%', x: 146.4, y: 609.36, width: 21.07, height: 36.96, fontName: 'g_d0_f1', fontFamily: 'LILDNN+Maestro' };
+  const fine = { text: 'Fine', x: 907, y: 722, width: 35, height: 18.48, fontName: 'text' };
+  const lastGeometry = { horizontal: [], vertical: [] };
+  addStaff(lastGeometry, 100, 9.24, 5, edges);
+  const jump = { text: 'D.S. al Fine', x: 1053, y: 153, width: 91, height: 18.48, fontName: 'text' };
+  const measures = [...findMeasures(canvas(), 1, [segno, fine], geometry), ...findMeasures(canvas(), 2, [jump], lastGeometry)];
+  assert.deepEqual(measures.flatMap((m, i) => m.segno ? [i] : []), [4]);
+  assert.deepEqual(compilePlaybackOrder(measures), { order: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 4, 5, 6, 7], warnings: [], valid: true });
+  for (const item of [{ ...segno, fontFamily: 'Arial' }, { ...segno, y: 595 }]) {
+    assert.ok(findMeasures(canvas(), 1, [item], geometry).every(m => !m.segno));
+  }
+});
+
 test('reads transformed line strokes, excluding curves and filled glyphs', () => {
   const { OPS } = pdfjs;
   const stroke = (x, y, endX, endY) => [OPS.stroke, [new Float32Array([0, x, y, 1, endX, endY])]];

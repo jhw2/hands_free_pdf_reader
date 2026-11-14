@@ -76,6 +76,12 @@ test('accepts standalone repeat counts but rejects part-only labels', () => {
   assert.equal(parseNavigationText('<2x Only>').repeatCount, undefined);
 });
 
+test('decodes Maestro segno without turning ordinary percentages into jumps', () => {
+  for (const font of ['Maestro', 'LILDNN+Maestro']) assert.equal(parseNavigationText('%', font).segno, true);
+  for (const font of ['', 'TimesNewRoman', 'ABCDEF+Arial', 'MaestroText']) assert.equal(parseNavigationText('%', font).segno, undefined);
+  assert.equal(parseNavigationText('50%', 'Maestro').segno, undefined);
+});
+
 test('guitar technique labels containing D C do not create da capo jumps', () => {
   for (const text of ['C&D C', 'U&D C', 'C&D C U&D C', 'QC C&D C', 'U&D C C', 'Practice D.C. slowly']) {
     assert.equal(parseNavigationText(text).jump, undefined, text);

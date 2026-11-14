@@ -6,9 +6,11 @@ import { compilePlaybackOrder, type NavigationMeasure } from "./navigation";
 import { readScoreGeometry, findVectorStaves, vectorBarsForStaff, type ScoreGeometry } from "./score-geometry";
 import styles from "./score-sync.module.css";
 import YoutubeSearch from "./youtube-search";
+import NavigationEditor from "./navigation-editor";
+import { buildNavigationMeasures, navigationEditsMatch, validateNavigationMarkers, type NavigationEdits } from "./navigation-edits";
 import { readLibrary, saveSong, activateSong, deleteSong, type SavedSong } from "./library";
 
-type ScoreTextItem = { text: string; x: number; y: number; width: number; height: number; fontName: string };
+type ScoreTextItem = { text: string; x: number; y: number; width: number; height: number; fontName: string; fontFamily?: string };
 type MeasureBox = NavigationMeasure & {
   id: string; page: number; system: number;
   top: number; left: number; width: number; height: number;
@@ -109,9 +111,9 @@ const readPdfTextItems = async (page: PDFPageProxy) => {
   } finally { reader.releaseLock(); }
 };
 
-type StoredMetadata = Partial<Pick<SavedSong, "youtubeUrl" | "fileName" | "bpm" | "beatsPerMeasure" | "offset">>;
+type StoredMetadata = Partial<Pick<SavedSong, "youtubeUrl" | "fileName" | "bpm" | "beatsPerMeasure" | "offset" | "navigationEdits">>;
 
-const parseNavigationText = (value: string) => {
+const parseNavigationText = (value: string, fontFamily = "") => {
   const text = value.normalize("NFKC").replace(/\s+/g, " ").trim();
   const mark: NavigationMeasure & { repeatCount?: number } = {};
   // Match a whole instruction: guitar techniques such as "C&D C" are not D.C.
@@ -124,7 +126,9 @@ const parseNavigationText = (value: string) => {
   } else if (/(?:\bTo\s+Coda\b|코다로)/i.test(text)) mark.toCoda = true;
 
   const raw = value.trim();
-  if (/^(?:Segno|세뇨)$/i.test(text) || ["𝄋", "\uE047", "\uF025"].includes(raw)) mark.segno = true;
+  // Legacy Maestro encodes the segno glyph as %, unlike ordinary text fonts.
+  if (/^(?:Segno|세뇨)$/i.test(text) || ["𝄋", "\uE047", "\uF025"].includes(raw)
+    || (raw === "%" && /^(?:[A-Z]{6}\+)?Maestro$/i.test(fontFamily))) mark.segno = true;
   if (/^(?:Coda|코다)$/i.test(text) || ["𝄌", "\uE048", "\uF0DE"].includes(raw)) mark.coda = true;
   if (/^(?:Fine|피네)[.!]?$/i.test(text)) mark.fine = true;
 
@@ -654,8 +658,11 @@ function findMeasures(canvas: HTMLCanvasElement, page: number, textItems: ScoreT
 
     const nearbyText = textItems.filter((item) => {
       const centerY = item.y + item.height / 2;
+      const mark = parseNavigationText(item.text, item.fontFamily);
+      const symbolAbove = (mark.segno || mark.coda) && item.y <= first.coreTop
+        && item.y + item.height >= first.coreTop - spacing * 4.5;
       return item.x + item.width >= left - spacing * 3 && item.x <= right + spacing * 3
-        && centerY >= first.coreTop - spacing * 4.5 && centerY <= last.coreBottom + spacing * 3.5;
+        && (symbolAbove || (centerY >= first.coreTop - spacing * 4.5 && centerY <= last.coreBottom + spacing * 3.5));
     });
     const rows: ScoreTextItem[][] = [];
     [...nearbyText].sort((a, b) => a.y - b.y || a.x - b.x).forEach((item) => {
@@ -682,7 +689,7 @@ function findMeasures(canvas: HTMLCanvasElement, page: number, textItems: ScoreT
 
     const applied = new Set<string>();
     phrases.forEach((phrase) => {
-      const mark = parseNavigationText(phrase.text);
+      const mark = parseNavigationText(phrase.text, phrase.fontFamily);
       if (!mark.jump && !mark.toCoda && !mark.segno && !mark.coda && !mark.fine && !mark.repeatCount) return;
       const key = `${phrase.x}:${phrase.y}:${mark.jump ?? ""}:${mark.toCoda ? "t" : ""}:${mark.segno ? "s" : ""}:${mark.coda ? "c" : ""}:${mark.fine ? "f" : ""}:${mark.repeatCount ?? ""}`;
       if (applied.has(key)) return;
@@ -726,6 +733,7 @@ export default function ScoreSyncPage() {
   const [fileName, setFileName] = useState("");
   const [pages, setPages] = useState<string[]>([]);
   const [measures, setMeasures] = useState<MeasureBox[]>([]);
+  const [navigationEdits, setNavigationEdits] = useState<NavigationEdits | null>(null);
   const [url, setUrl] = useState("");
   const [videoId, setVideoId] = useState<string | null>(null);
   const [playerGeneration, setPlayerGeneration] = useState(0);
@@ -754,20 +762,22 @@ export default function ScoreSyncPage() {
   const pdfLoadVersionRef = useRef(0);
 
   const storeMetadata = (changes: StoredMetadata) => {
-    if (!currentSongRef.current) return;
+    if (!currentSongRef.current) return Promise.resolve(false);
     const song = { ...currentSongRef.current, ...changes, updatedAt: Date.now() };
     currentSongRef.current = song;
     setSongs(items => [song, ...items.filter(item => item.id !== song.id)]);
     const version = ++saveVersionRef.current;
     pendingSavesRef.current.set(song.id, version);
     setUnsavedIds(ids => new Set(ids).add(song.id));
-    void saveSong(song, true).then(() => {
-      if (pendingSavesRef.current.get(song.id) !== version) return;
+    return saveSong(song, true).then(() => {
+      if (pendingSavesRef.current.get(song.id) !== version) return true;
       pendingSavesRef.current.delete(song.id);
       setUnsavedIds(ids => { const next = new Set(ids); next.delete(song.id); return next; });
       if (currentSongRef.current?.id === song.id) setSaveError("");
+      return true;
     }).catch(() => {
       if (pendingSavesRef.current.get(song.id) === version && currentSongRef.current?.id === song.id) setSaveError("이 곡의 변경사항을 저장하지 못했어요. 저장 공간을 확인한 뒤 다시 저장해 주세요.");
+      return false;
     });
   };
 
@@ -778,7 +788,31 @@ export default function ScoreSyncPage() {
     setCountdown(null); setCountdownMeasure(null);
   };
 
-  const navigation = useMemo(() => compilePlaybackOrder(measures), [measures]);
+  const navigation = useMemo(() => {
+    const corrected = navigationEdits && navigationEditsMatch(navigationEdits, measures)
+      && !validateNavigationMarkers(navigationEdits.markers, measures.length)
+      ? buildNavigationMeasures(measures, navigationEdits.markers) : measures;
+    return compilePlaybackOrder(corrected);
+  }, [measures, navigationEdits]);
+  const saveNavigationEdits = async (edits: NavigationEdits | null) => {
+    if (!currentSongRef.current || loading || restoring || deleting) return false;
+    if (edits && (!navigationEditsMatch(edits, measures) || validateNavigationMarkers(edits.markers, measures.length)
+      || !compilePlaybackOrder(buildNavigationMeasures(measures, edits.markers)).valid)) return false;
+    cancelCountdown(); desiredPlayingRef.current = false;
+    try { playerRef.current?.pauseVideo(); } catch { /* A disconnected player is already stopped. */ }
+    setPlaying(false);
+    setNavigationEdits(edits);
+    return storeMetadata({ navigationEdits: edits });
+  };
+  const [showNavigationWarning, setShowNavigationWarning] = useState(false);
+  useEffect(() => {
+    setShowNavigationWarning(false);
+    if (loading || restoring || navigation.valid || !measures.some(measure =>
+      measure.repeatStart || measure.repeatEnd || measure.jump || measure.volta?.length || measure.voltaPasses?.length)) return;
+    setShowNavigationWarning(true);
+    const timer = window.setTimeout(() => setShowNavigationWarning(false), 5000);
+    return () => window.clearTimeout(timer);
+  }, [navigation, measures, loading, restoring]);
   const playbackOrder = useMemo(() => navigation.valid && navigation.order.length
     ? navigation.order
     : measures.map((_, index) => index), [measures, navigation]);
@@ -939,7 +973,7 @@ export default function ScoreSyncPage() {
   const openPdfBlob = async (blob: Blob, nextFileName: string, shouldPersist: boolean, requestedVersion?: number, savedSong?: SavedSong) => {
     const loadVersion = requestedVersion ?? ++pdfLoadVersionRef.current;
     if (loadVersion !== pdfLoadVersionRef.current) return;
-    setLoading(true); setError(""); setPages([]); setMeasures([]); setFileName(nextFileName);
+    setLoading(true); setError(""); setPages([]); setMeasures([]); setNavigationEdits(null); setFileName(nextFileName);
     if (shouldPersist) {
       ++saveVersionRef.current;
       disconnectYoutube(false); currentSongRef.current = null;
@@ -956,6 +990,7 @@ export default function ScoreSyncPage() {
         const textItems = await readPdfTextItems(page);
         const base = page.getViewport({ scale: 1 });
         const viewport = page.getViewport({ scale: Math.min(2, 1200 / base.width) });
+        const operators = await page.getOperatorList();
         const pageTextItems = textItems.flatMap((raw: unknown): ScoreTextItem[] => {
           const item = raw as { str?: unknown; transform?: number[]; width?: number; height?: number; fontName?: string };
           if (typeof item.str !== "string" || !Array.isArray(item.transform)) return [];
@@ -969,11 +1004,12 @@ export default function ScoreSyncPage() {
             width: Math.abs(item.width ?? 0) * viewport.scale,
             height: textHeight,
             fontName: item.fontName ?? "",
+            fontFamily: item.fontName && page.commonObjs.has(item.fontName) ? page.commonObjs.get(item.fontName).name ?? "" : "",
           }];
         });
         const canvas = document.createElement("canvas"); canvas.width = viewport.width; canvas.height = viewport.height;
         const context = canvas.getContext("2d"); if (!context) continue;
-        const geometry = readScoreGeometry(await page.getOperatorList(), viewport.transform, pdfjs);
+        const geometry = readScoreGeometry(operators, viewport.transform, pdfjs);
         await page.render({ canvas, canvasContext: context, viewport }).promise;
         nextMeasures.push(...findMeasures(canvas, pageNumber, pageTextItems, geometry));
         nextPages.push(canvas.toDataURL("image/jpeg", .9));
@@ -987,7 +1023,7 @@ export default function ScoreSyncPage() {
       setTempoDetected(!savedSong && !!detectedBpm);
       setBeatsPerMeasure(savedSong?.beatsPerMeasure ?? detectedBeats);
       setOffset(savedSong?.offset ?? 0);
-      setPages(nextPages); setMeasures(nextMeasures);
+      setPages(nextPages); setMeasures(nextMeasures); setNavigationEdits(savedSong?.navigationEdits ?? null);
       if (!nextMeasures.length) setError("오선 5개를 정확히 확인할 수 없어요. 더 선명한 악보 PDF를 사용해 주세요.");
       if (shouldPersist) {
         currentSongRef.current = {
@@ -1236,7 +1272,7 @@ export default function ScoreSyncPage() {
   return <main className={styles.shell}>
     <input ref={fileInputRef} type="file" accept="application/pdf" onChange={loadPdf} hidden disabled={loading || restoring || deleting} aria-label="악보 PDF 선택"/>
     {error && <p className={styles.error} role="alert">{error}</p>}
-    {!error && measures.length > 0 && !navigation.valid && <p className={styles.warning} role="status">반복 경로를 확정하지 못해 악보 순서대로 표시합니다.</p>}
+    {!error && !loading && !restoring && showNavigationWarning && <p className={styles.warning} role="status">반복 경로를 확정하지 못해 악보 순서대로 표시합니다.</p>}
     <section className={styles.scorePanel} aria-label="악보">
       <div className={styles.pages}>
         {loading || restoring ? <div className={styles.empty} role="status"><span className={styles.spinner}/><h2>{restoring ? "보관함을 열고 있어요" : "악보에서 마디를 찾고 있어요"}</h2><p>준비가 끝나면 원하는 마디부터 연습할 수 있어요.</p></div> : !pages.length ? <div className={styles.empty}>
@@ -1277,10 +1313,11 @@ export default function ScoreSyncPage() {
             <div className={styles.connection}><YoutubeSearch value={url} disabled={!pages.length || loading || restoring || deleting} isLink={!!getVideoId(url)} onChange={updateYoutubeUrl} onConnect={attachYoutube}/>
               {readyToPlay && <p className={styles.readyHint}>● 연결됐어요. 재생 버튼을 누르거나 악보의 마디를 눌러보세요.</p>}
               <details className={styles.syncSettings}><summary>싱크 조절 <span>BPM · 박자 · 시작 시간</span></summary><fieldset disabled={!pages.length || loading || restoring || deleting}>
-                <div className={styles.settingsRow}><label>{tempoDetected ? "감지한 BPM" : "BPM"}<input type="number" min="30" max="300" value={bpm} onChange={event => updateBpm(Number(event.target.value))}/></label><label>한 마디 박자<select value={beatsPerMeasure} onChange={event => updateBeatsPerMeasure(Number(event.target.value))}>{[2,3,4,5,6,7,8,9,10,11,12].map(beats => <option key={beats} value={beats}>{beats}박</option>)}</select></label></div>
-                <label className={styles.offset}>악보 첫 마디 시작 시간 (초)<input type="number" inputMode="decimal" min="0" step="0.1" value={offset} onFocus={event => event.currentTarget.select()} onChange={event => { const value = Number(event.target.value); if (!Number.isFinite(value) || value < 0) return; setOffset(value); storeMetadata({ offset: value }); }}/></label>
+                <div className={styles.settingsRow}><label>{tempoDetected ? "감지한 BPM" : "BPM"}<input type="number" min="30" max="300" value={bpm} onChange={event => updateBpm(Number(event.target.value))}/></label><label>한 마디 박자<select value={beatsPerMeasure} onChange={event => updateBeatsPerMeasure(Number(event.target.value))}>{[2,3,4,5,6,7,8,9,10,11,12].map(beats => <option key={beats} value={beats}>{beats}박</option>)}</select></label>
+                <label>첫 마디 시작 (초)<input aria-label="악보 첫 마디 시작 시간 (초)" type="number" inputMode="decimal" min="0" step="0.1" value={offset} onFocus={event => event.currentTarget.select()} onChange={event => { const value = Number(event.target.value); if (!Number.isFinite(value) || value < 0) return; setOffset(value); storeMetadata({ offset: value }); }}/></label></div>
                 <p>음원과 악보가 어긋날 때만 조절하세요. 설정은 이 곡에 자동 저장됩니다.</p>
               </fieldset></details>
+              {measures.length > 0 && <NavigationEditor key={currentSongRef.current?.id} measures={measures} saved={navigationEdits} disabled={loading || restoring || deleting} onSave={saveNavigationEdits}/>}
             </div>
             <div className={styles.videoArea}><div className={styles.miniPlayer} hidden={!videoId}><div ref={playerHostRef}/></div>{!videoId && <div className={styles.videoPlaceholder}><span aria-hidden="true">▷</span><p>연결한 영상이<br/>여기에 표시됩니다</p></div>}</div>
           </div>

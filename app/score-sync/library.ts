@@ -1,3 +1,5 @@
+import type { NavigationEdits } from "./navigation-edits";
+
 export type SavedSong = {
   id: string;
   fileName: string;
@@ -6,6 +8,7 @@ export type SavedSong = {
   bpm: number;
   beatsPerMeasure: number;
   offset: number;
+  navigationEdits?: NavigationEdits | null;
   updatedAt: number;
 };
 
