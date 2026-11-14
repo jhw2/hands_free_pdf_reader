@@ -5,6 +5,8 @@ import type { PDFPageProxy } from "pdfjs-dist";
 import { compilePlaybackOrder, type NavigationMeasure } from "./navigation";
 import { readScoreGeometry, findVectorStaves, vectorBarsForStaff, type ScoreGeometry } from "./score-geometry";
 import styles from "./score-sync.module.css";
+import YoutubeSearch from "./youtube-search";
+import { readLibrary, saveSong, activateSong, deleteSong, type SavedSong } from "./library";
 
 type ScoreTextItem = { text: string; x: number; y: number; width: number; height: number; fontName: string };
 type MeasureBox = NavigationMeasure & {
@@ -107,57 +109,7 @@ const readPdfTextItems = async (page: PDFPageProxy) => {
   } finally { reader.releaseLock(); }
 };
 
-const SCORE_SYNC_LOCAL_KEY = "score-sync:last-session";
-const SCORE_SYNC_DB_NAME = "score-sync-cache";
-const SCORE_SYNC_STORE_NAME = "session";
-const SCORE_SYNC_PDF_KEY = "last-pdf";
-
-type StoredPdf = { blob: Blob; fileName: string; updatedAt: number };
-type StoredMetadata = { youtubeUrl?: string; fileName?: string; bpm?: number; beatsPerMeasure?: number };
-
-const openScoreSyncDb = () => new Promise<IDBDatabase>((resolve, reject) => {
-  const request = indexedDB.open(SCORE_SYNC_DB_NAME, 1);
-  request.onupgradeneeded = () => {
-    if (!request.result.objectStoreNames.contains(SCORE_SYNC_STORE_NAME)) request.result.createObjectStore(SCORE_SYNC_STORE_NAME);
-  };
-  request.onsuccess = () => { request.result.onversionchange = () => request.result.close(); resolve(request.result); };
-  request.onerror = () => reject(request.error);
-  request.onblocked = () => reject(new Error("IndexedDB is blocked"));
-});
-
-const readStoredPdf = async () => {
-  const db = await openScoreSyncDb();
-  return new Promise<StoredPdf | null>((resolve, reject) => {
-    const transaction = db.transaction(SCORE_SYNC_STORE_NAME, "readonly");
-    const request = transaction.objectStore(SCORE_SYNC_STORE_NAME).get(SCORE_SYNC_PDF_KEY);
-    transaction.oncomplete = () => { resolve((request.result as StoredPdf | undefined) ?? null); db.close(); };
-    transaction.onerror = () => { reject(transaction.error); db.close(); };
-    transaction.onabort = transaction.onerror;
-  });
-};
-
-const storePdf = async (blob: Blob, fileName: string) => {
-  const db = await openScoreSyncDb();
-  return new Promise<void>((resolve, reject) => {
-    const transaction = db.transaction(SCORE_SYNC_STORE_NAME, "readwrite");
-    transaction.objectStore(SCORE_SYNC_STORE_NAME).put({ blob, fileName, updatedAt: Date.now() } satisfies StoredPdf, SCORE_SYNC_PDF_KEY);
-    transaction.oncomplete = () => { resolve(); db.close(); };
-    transaction.onerror = () => { reject(transaction.error); db.close(); };
-    transaction.onabort = transaction.onerror;
-  });
-};
-
-const readStoredMetadata = (): StoredMetadata => {
-  try {
-    const value = JSON.parse(localStorage.getItem(SCORE_SYNC_LOCAL_KEY) ?? "{}");
-    return value && typeof value === "object" ? value as StoredMetadata : {};
-  }
-  catch { return {}; }
-};
-
-const storeMetadata = (changes: StoredMetadata) => {
-  localStorage.setItem(SCORE_SYNC_LOCAL_KEY, JSON.stringify({ ...readStoredMetadata(), ...changes }));
-};
+type StoredMetadata = Partial<Pick<SavedSong, "youtubeUrl" | "fileName" | "bpm" | "beatsPerMeasure" | "offset">>;
 
 const parseNavigationText = (value: string) => {
   const text = value.normalize("NFKC").replace(/\s+/g, " ").trim();
@@ -758,6 +710,19 @@ export default function ScoreSyncPage() {
   useEffect(() => {
     try { window.speechSynthesis?.getVoices(); } catch { /* Visual countdown remains available. */ }
   }, []);
+  const [expanded, setExpanded] = useState(false);
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const [songs, setSongs] = useState<SavedSong[]>([]);
+  const [restoring, setRestoring] = useState(true);
+  const [deleting, setDeleting] = useState(false);
+  const [saveError, setSaveError] = useState("");
+  const [unsavedIds, setUnsavedIds] = useState<Set<string>>(new Set());
+  const pendingSavesRef = useRef(new Map<string, number>());
+  const currentSongRef = useRef<SavedSong | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const dragStartRef = useRef<number | null>(null);
+  const draggedRef = useRef(false);
+  const saveVersionRef = useRef(0);
   const [fileName, setFileName] = useState("");
   const [pages, setPages] = useState<string[]>([]);
   const [measures, setMeasures] = useState<MeasureBox[]>([]);
@@ -787,6 +752,24 @@ export default function ScoreSyncPage() {
   const pollFailuresRef = useRef(0);
   const lastSelectedTargetRef = useRef(0);
   const pdfLoadVersionRef = useRef(0);
+
+  const storeMetadata = (changes: StoredMetadata) => {
+    if (!currentSongRef.current) return;
+    const song = { ...currentSongRef.current, ...changes, updatedAt: Date.now() };
+    currentSongRef.current = song;
+    setSongs(items => [song, ...items.filter(item => item.id !== song.id)]);
+    const version = ++saveVersionRef.current;
+    pendingSavesRef.current.set(song.id, version);
+    setUnsavedIds(ids => new Set(ids).add(song.id));
+    void saveSong(song, true).then(() => {
+      if (pendingSavesRef.current.get(song.id) !== version) return;
+      pendingSavesRef.current.delete(song.id);
+      setUnsavedIds(ids => { const next = new Set(ids); next.delete(song.id); return next; });
+      if (currentSongRef.current?.id === song.id) setSaveError("");
+    }).catch(() => {
+      if (pendingSavesRef.current.get(song.id) === version && currentSongRef.current?.id === song.id) setSaveError("이 곡의 변경사항을 저장하지 못했어요. 저장 공간을 확인한 뒤 다시 저장해 주세요.");
+    });
+  };
 
   const cancelCountdown = () => {
     stopCountIn();
@@ -846,7 +829,8 @@ export default function ScoreSyncPage() {
     const current = document.querySelector<HTMLElement>('[data-current="true"]');
     if (!current) return;
     const rect = current.getBoundingClientRect();
-    if (rect.top < 70 || rect.bottom > window.innerHeight - 12) current.scrollIntoView({ block: "center", behavior: "smooth" });
+    const panel = current.closest("section")?.getBoundingClientRect();
+    if (panel && (rect.top < panel.top + 14 || rect.bottom > panel.bottom - 14)) current.scrollIntoView({ block: "center", behavior: "smooth" });
   }, [activeIndex]);
 
   useEffect(() => {
@@ -940,7 +924,7 @@ export default function ScoreSyncPage() {
     };
   }, [playerGeneration, videoId]);
 
-  const disconnectYoutube = () => {
+  const disconnectYoutube = (persist = true) => {
     cancelCountdown();
     desiredPlayingRef.current = false;
     playerReadyRef.current = false;
@@ -948,15 +932,20 @@ export default function ScoreSyncPage() {
     youtubeRetryRef.current = 0;
     setUrl(""); setVideoId(null); setPlayerReady(false); setPlaying(false);
     setTime(0); setOffset(0); setDuration(240); setError("");
-    try { storeMetadata({ youtubeUrl: "" }); }
+    try { if (persist) storeMetadata({ youtubeUrl: "", offset: 0 }); }
     catch { setError("이전 YouTube 링크를 저장 공간에서 지우지 못했어요."); }
   };
 
-  const openPdfBlob = async (blob: Blob, nextFileName: string, shouldPersist: boolean, requestedVersion?: number) => {
+  const openPdfBlob = async (blob: Blob, nextFileName: string, shouldPersist: boolean, requestedVersion?: number, savedSong?: SavedSong) => {
     const loadVersion = requestedVersion ?? ++pdfLoadVersionRef.current;
     if (loadVersion !== pdfLoadVersionRef.current) return;
     setLoading(true); setError(""); setPages([]); setMeasures([]); setFileName(nextFileName);
-    if (shouldPersist) { disconnectYoutube(); setBpm(120); setBeatsPerMeasure(4); setTempoDetected(false); }
+    if (shouldPersist) {
+      ++saveVersionRef.current;
+      disconnectYoutube(false); currentSongRef.current = null;
+      setBpm(120); setBeatsPerMeasure(4); setTempoDetected(false);
+      setExpanded(true); setLibraryOpen(false); setSaveError("");
+    }
     try {
       const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
       pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
@@ -994,18 +983,24 @@ export default function ScoreSyncPage() {
       applyVoltaPasses(nextMeasures);
       const detectedBpm = detectTempo(scoreText.join(" "));
       const detectedBeats = detectBeatsPerMeasure(scoreText.join(" "));
-      if (detectedBpm) { setBpm(detectedBpm); setTempoDetected(true); }
-      else setTempoDetected(false);
-      setBeatsPerMeasure(detectedBeats);
+      setBpm(savedSong?.bpm ?? detectedBpm ?? 120);
+      setTempoDetected(!savedSong && !!detectedBpm);
+      setBeatsPerMeasure(savedSong?.beatsPerMeasure ?? detectedBeats);
+      setOffset(savedSong?.offset ?? 0);
       setPages(nextPages); setMeasures(nextMeasures);
       if (!nextMeasures.length) setError("오선 5개를 정확히 확인할 수 없어요. 더 선명한 악보 PDF를 사용해 주세요.");
       if (shouldPersist) {
-        try {
-          await storePdf(blob, nextFileName);
-          storeMetadata({ fileName: nextFileName, ...(detectedBpm ? { bpm: detectedBpm } : {}), beatsPerMeasure: detectedBeats });
-        } catch {
-          setError("악보는 열었지만 브라우저 저장 공간이 부족해 자동 저장하지 못했어요.");
-        }
+        currentSongRef.current = {
+          id: crypto.randomUUID(), fileName: nextFileName, blob,
+          youtubeUrl: "", bpm: detectedBpm ?? 120, beatsPerMeasure: detectedBeats,
+          offset: 0, updatedAt: Date.now(),
+        };
+        storeMetadata({});
+      }
+      if (savedSong) {
+        setUrl(savedSong.youtubeUrl);
+        setVideoId(getVideoId(savedSong.youtubeUrl));
+        setPlayerGeneration(generation => generation + 1);
       }
     } catch { setError("PDF를 읽지 못했어요. 다른 악보 파일로 다시 시도해 주세요."); }
     finally { if (loadVersion === pdfLoadVersionRef.current) setLoading(false); }
@@ -1018,29 +1013,56 @@ export default function ScoreSyncPage() {
     event.target.value = "";
   };
 
+  const selectSong = async (song: SavedSong) => {
+    ++saveVersionRef.current;
+    disconnectYoutube(false);
+    currentSongRef.current = song;
+    setLibraryOpen(false); setExpanded(!song.youtubeUrl || unsavedIds.has(song.id));
+    setSaveError(unsavedIds.has(song.id) ? "이 곡에는 아직 저장되지 않은 변경사항이 있어요. 다시 저장해 주세요." : "");
+    const version = ++pdfLoadVersionRef.current;
+    void activateSong(song.id).catch(() => {
+      if (currentSongRef.current?.id === song.id) setSaveError("마지막으로 연 곡을 저장하지 못했어요.");
+    });
+    await openPdfBlob(song.blob, song.fileName, false, version, song);
+  };
+
+  const removeSong = async (song: SavedSong) => {
+    if (!window.confirm(`‘${song.fileName}’을 보관함에서 삭제할까요?`)) return;
+    setDeleting(true);
+    try {
+      await deleteSong(song.id);
+      pendingSavesRef.current.delete(song.id);
+      setUnsavedIds(ids => { const next = new Set(ids); next.delete(song.id); return next; });
+      setSongs(items => items.filter(item => item.id !== song.id));
+      if (currentSongRef.current?.id === song.id) {
+        ++saveVersionRef.current;
+        ++pdfLoadVersionRef.current;
+        disconnectYoutube(false); currentSongRef.current = null;
+        setPages([]); setMeasures([]); setFileName(""); setSaveError(""); setLoading(false);
+      }
+    } catch { setError("곡을 삭제하지 못했어요. 잠시 후 다시 시도해 주세요."); }
+    finally { setDeleting(false); }
+  };
+
   useEffect(() => {
-    const restoreVersion = ++pdfLoadVersionRef.current;
+    let disposed = false;
     const restore = async () => {
-      const metadata = readStoredMetadata();
-      if (metadata.youtubeUrl) {
-        const storedVideoId = getVideoId(metadata.youtubeUrl);
-        if (storedVideoId) { setUrl(metadata.youtubeUrl); setVideoId(storedVideoId); }
-      }
-      if (metadata.bpm && metadata.bpm >= 30 && metadata.bpm <= 300) setBpm(metadata.bpm);
-      if (metadata.beatsPerMeasure && metadata.beatsPerMeasure >= 2 && metadata.beatsPerMeasure <= 12) setBeatsPerMeasure(metadata.beatsPerMeasure);
       try {
-        const storedPdf = await readStoredPdf();
-        if (restoreVersion !== pdfLoadVersionRef.current) return;
-        if (storedPdf?.blob) await openPdfBlob(storedPdf.blob, storedPdf.fileName || metadata.fileName || "저장된 악보.pdf", false, restoreVersion);
+        const library = await readLibrary();
+        if (disposed) return;
+        setSongs(library.songs);
+        const song = library.songs.find(item => item.id === library.activeId) ?? library.songs[0];
+        if (song) await selectSong(song);
       } catch {
-        if (restoreVersion === pdfLoadVersionRef.current) setError("저장된 악보를 다시 불러오지 못했어요. PDF를 다시 선택해 주세요.");
-      }
+        if (!disposed) setSaveError("보관함을 불러오지 못했어요. 새 악보는 열 수 있지만 자동 저장이 제한될 수 있어요.");
+      } finally { if (!disposed) setRestoring(false); }
     };
     void restore();
+    return () => { disposed = true; ++pdfLoadVersionRef.current; };
   }, []);
 
-  const attachYoutube = () => {
-    const id = getVideoId(url);
+  const attachYoutube = (value: string = url) => {
+    const id = getVideoId(value);
     if (!id) { setError("올바른 유튜브 링크를 입력해 주세요."); return; }
     cancelCountdown();
     playerReadyRef.current = false;
@@ -1051,7 +1073,8 @@ export default function ScoreSyncPage() {
     setDuration(240);
     youtubeRetryRef.current = 0;
     lastSelectedTargetRef.current = 0;
-    try { storeMetadata({ youtubeUrl: url.trim() }); }
+    setUrl(value.trim());
+    try { storeMetadata({ youtubeUrl: value.trim() }); }
     catch { setError("링크를 연결했지만 브라우저 저장 공간에 저장하지 못했어요."); }
     setVideoId(id);
     setPlayerGeneration((generation) => generation + 1);
@@ -1086,6 +1109,7 @@ export default function ScoreSyncPage() {
     setTime(target);
     setPlaying(false);
     setError("");
+    setExpanded(false);
     setCountdown(4);
     setCountdownMeasure(index);
     const startedAt = performance.now();
@@ -1183,6 +1207,7 @@ export default function ScoreSyncPage() {
       desiredPlayingRef.current = false;
       playerRef.current.pauseVideo();
     } else {
+      setExpanded(false);
       desiredPlayingRef.current = true;
       const currentTime = playerRef.current.getCurrentTime();
       if (playerRef.current.getPlayerState() === 0) playerRef.current.seekTo(lastSelectedTargetRef.current, true);
@@ -1204,25 +1229,63 @@ export default function ScoreSyncPage() {
     try { storeMetadata({ beatsPerMeasure: value }); } catch { /* Playback can continue without persistence. */ }
   };
 
+  const title = fileName.replace(/\.pdf$/i, "");
+  const readyToPlay = playerReady && getVideoId(url) === videoId;
+  const openFile = () => fileInputRef.current?.click();
+
   return <main className={styles.shell}>
-    <header className={styles.toolbar}>
-      <label className={styles.fileButton}>{fileName || "PDF 열기"}<input type="file" accept="application/pdf" onChange={loadPdf}/></label>
-      <div className={styles.youtubeInput}><input type="search" inputMode="url" autoComplete="off" autoCapitalize="none" spellCheck={false} value={url} onChange={(e) => updateYoutubeUrl(e.target.value)} onKeyDown={(e) => e.key === "Enter" && attachYoutube()} placeholder="YouTube 링크" aria-label="유튜브 링크"/><button onClick={attachYoutube}>연결</button></div>
-      <button className={styles.playButton} onClick={togglePlayback} disabled={!playerReady || getVideoId(url) !== videoId} aria-label={playing ? "일시 정지" : "재생"}>{playing ? "Ⅱ" : "▶"}</button>
-      <label className={styles.tempoControl}><span>{tempoDetected ? "감지 BPM" : "BPM"}</span><input type="number" min="30" max="300" value={bpm} onChange={(event) => updateBpm(Number(event.target.value))}/></label>
-      <label className={styles.meterControl}><span>박자</span><select value={beatsPerMeasure} onChange={(event) => updateBeatsPerMeasure(Number(event.target.value))}><option value={2}>2박</option><option value={3}>3박</option><option value={4}>4박</option><option value={6}>6박</option></select></label>
-      <div className={styles.progress}><span style={{ width: `${Math.min(100, time / duration * 100)}%` }}/></div>
-      <span className={styles.clock}>{formatTime(time)} / {formatTime(duration)}</span>
-      <label className={styles.offset}>시작 <input type="range" min="0" max={Math.max(30, duration / 2)} value={offset} onChange={(e) => setOffset(Number(e.target.value))}/><output>{formatTime(offset)}</output></label>
-      <span className={styles.measureCount}>{activeIndex >= 0 ? `${activeIndex + 1}마디 · ${playbackStep + 1}/${playbackOrder.length}` : measures.length ? `${measures.length}마디` : ""}</span>
-    </header>
+    <input ref={fileInputRef} type="file" accept="application/pdf" onChange={loadPdf} hidden disabled={loading || restoring || deleting} aria-label="악보 PDF 선택"/>
     {error && <p className={styles.error} role="alert">{error}</p>}
     {!error && measures.length > 0 && !navigation.valid && <p className={styles.warning} role="status">반복 경로를 확정하지 못해 악보 순서대로 표시합니다.</p>}
-    <section className={styles.scorePanel}>
+    <section className={styles.scorePanel} aria-label="악보">
       <div className={styles.pages}>
-        {loading ? <div className={styles.empty}><span className={styles.spinner}/><h3>마디선을 찾고 있어요</h3></div> : !pages.length ? <div className={styles.empty}><div className={styles.note}>♩</div><h3>PDF 악보를 열어주세요</h3></div> : pages.map((src, pageIndex) => <div className={styles.page} key={src}><img src={src} alt={`악보 ${pageIndex + 1}페이지`}/>{measures.map((box, index) => box.page === pageIndex + 1 && <button key={box.id} data-current={index === activeIndex ? "true" : undefined} onClick={() => jumpToMeasure(index)} className={`${styles.system} ${index === activeIndex ? styles.active : ""}`} style={{ top: `${box.top}%`, left: `${box.left}%`, width: `${box.width}%`, height: `${box.height}%` }} aria-label={`${index + 1}번 마디로 이동`}><span aria-hidden="true">{index + 1}</span>{countdown !== null && countdownMeasure === index ? <b className={styles.measureCountdown} role="timer" aria-live="assertive" aria-label={countdown === 0 ? "재생 위치 확인 중" : undefined}>{countdown === 0 ? "…" : 5 - countdown}</b> : null}</button>)}</div>)}
-        {videoId ? <div className={styles.miniPlayer}><div ref={playerHostRef}/></div> : null}
+        {loading || restoring ? <div className={styles.empty} role="status"><span className={styles.spinner}/><h2>{restoring ? "보관함을 열고 있어요" : "악보에서 마디를 찾고 있어요"}</h2><p>준비가 끝나면 원하는 마디부터 연습할 수 있어요.</p></div> : !pages.length ? <div className={styles.empty}>
+          <span className={styles.eyebrow}>악보와 음악, 한곳에서</span>
+          <div className={styles.note} aria-hidden="true">♫</div>
+          <h1>오늘 연습할 곡을<br/>열어보세요.</h1>
+          <p>악보와 YouTube를 연결하면<br/>음악에 맞춰 지금 연주할 마디를 보여드려요.</p>
+          <button className={styles.primaryButton} onClick={openFile}>＋ 악보 PDF 열기</button>
+          {songs.length > 0 && <button className={styles.textButton} onClick={() => { setExpanded(true); setLibraryOpen(true); }}>악보 목록에서 선택하기 · {songs.length}곡</button>}
+          <div className={styles.steps}><span><b>1</b> 악보 열기</span><span><b>2</b> YouTube 연결</span><span><b>3</b> 원하는 마디부터</span></div>
+        </div> : pages.map((src, pageIndex) => <div className={styles.page} key={src}><img src={src} alt={`악보 ${pageIndex + 1}페이지`}/>{measures.map((box, index) => box.page === pageIndex + 1 && <button key={box.id} data-current={index === activeIndex ? "true" : undefined} onClick={() => jumpToMeasure(index)} className={`${styles.system} ${index === activeIndex ? styles.active : ""}`} style={{ top: `${box.top}%`, left: `${box.left}%`, width: `${box.width}%`, height: `${box.height}%` }} aria-label={`${index + 1}번 마디로 이동`}><span aria-hidden="true">{index + 1}</span>{countdown !== null && countdownMeasure === index ? <b className={styles.measureCountdown} role="timer" aria-live="assertive" aria-label={countdown === 0 ? "재생 위치 확인 중" : undefined}>{countdown === 0 ? "…" : 5 - countdown}</b> : null}</button>)}</div>)}
       </div>
     </section>
+    <footer className={styles.dock} aria-label="연습 메뉴">
+      <button className={styles.grip} title={expanded ? "메뉴 접기" : "메뉴 펼치기"} aria-label={expanded ? "메뉴 접기" : "메뉴 펼치기"} aria-expanded={expanded} aria-controls="practice-menu"
+        onPointerDown={event => { dragStartRef.current = event.clientY; draggedRef.current = false; event.currentTarget.setPointerCapture(event.pointerId); }}
+        onPointerUp={event => { if (dragStartRef.current !== null && Math.abs(event.clientY - dragStartRef.current) > 24) { setExpanded(event.clientY < dragStartRef.current); draggedRef.current = true; } dragStartRef.current = null; }}
+        onPointerCancel={() => { dragStartRef.current = null; }}
+        onClick={event => { if (!draggedRef.current || event.detail === 0) setExpanded(value => !value); draggedRef.current = false; }}><span><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false"><path d="m6 15 6-6 6 6"/></svg></span></button>
+      <div className={styles.transport}>
+        <button className={styles.playButton} onClick={togglePlayback} disabled={!readyToPlay || loading || restoring || deleting} aria-label={playing ? "일시 정지" : "재생"}>{playing ? "Ⅱ" : "▶"}</button>
+        <div className={styles.nowPlaying}><strong>{title || "새로운 연습을 시작하세요"}</strong><span>{saveError ? "저장 확인 필요 · 메뉴에서 다시 저장해 주세요" : loading ? "악보 분석 중" : countdown !== null ? "선택한 마디에서 시작할 준비 중" : !fileName ? "PDF 악보를 먼저 열어주세요" : !videoId ? "메뉴에서 YouTube 링크를 연결하세요" : !playerReady ? "YouTube 연결 중" : activeIndex >= 0 ? `${activeIndex + 1}마디 · ${playbackStep + 1}/${playbackOrder.length}` : "재생 준비 완료"}</span></div>
+        {videoId && <span className={styles.clock}>{formatTime(time)} <span>/ {formatTime(duration)}</span></span>}
+      </div>
+      <div className={styles.progress} aria-hidden="true"><span style={{ width: `${Math.min(100, time / duration * 100)}%` }}/></div>
+      <div id="practice-menu" className={styles.drawerBody} hidden={!expanded}>
+        <div className={styles.menuHeading}><button className={styles.secondaryButton} aria-pressed={libraryOpen} onClick={() => setLibraryOpen(value => !value)}>악보 목록</button><button className={styles.primaryButton} onClick={openFile} disabled={loading || restoring || deleting}>＋ 새 악보 추가</button></div>
+        {saveError && <div className={styles.saveError} role="alert"><span>{saveError}</span>{currentSongRef.current && <button onClick={() => storeMetadata({})}>다시 저장</button>}</div>}
+        <section hidden={!libraryOpen} aria-label="악보 목록">
+          {!songs.length ? <p className={styles.libraryEmpty}>아직 저장한 곡이 없어요. 첫 악보를 추가해 보세요.</p> : <ul className={styles.songList}>{songs.map(song => <li key={song.id} className={song.id === currentSongRef.current?.id ? styles.selectedSong : ""}>
+            <button className={styles.songSelect} disabled={loading || restoring || deleting} onClick={() => void selectSong(song)} aria-current={song.id === currentSongRef.current?.id ? "true" : undefined}><span className={styles.songIcon} aria-hidden="true">♫</span><span><strong>{song.fileName.replace(/\.pdf$/i, "")}</strong><small>{unsavedIds.has(song.id) ? "저장 필요 · " : ""}{song.youtubeUrl ? "YouTube 연결됨" : "YouTube 미연결"} · {song.bpm} BPM{song.id === currentSongRef.current?.id ? " · 현재 곡" : ""}</small></span></button>
+            <button className={styles.deleteButton} onClick={() => void removeSong(song)} disabled={loading || restoring || deleting} aria-label={`${song.fileName} 삭제`}>삭제</button>
+          </li>)}</ul>}
+          <p className={styles.storageNote}>이 브라우저에 저장됩니다. 브라우저 데이터를 지우면 보관함도 삭제돼요.</p>
+        </section>
+        <section hidden={libraryOpen} aria-label="현재 곡 설정">
+          <div className={styles.setupGrid}>
+            <div className={styles.connection}><YoutubeSearch value={url} disabled={!pages.length || loading || restoring || deleting} isLink={!!getVideoId(url)} onChange={updateYoutubeUrl} onConnect={attachYoutube}/>
+              {readyToPlay && <p className={styles.readyHint}>● 연결됐어요. 재생 버튼을 누르거나 악보의 마디를 눌러보세요.</p>}
+              <details className={styles.syncSettings}><summary>싱크 조절 <span>BPM · 박자 · 시작 시간</span></summary><fieldset disabled={!pages.length || loading || restoring || deleting}>
+                <div className={styles.settingsRow}><label>{tempoDetected ? "감지한 BPM" : "BPM"}<input type="number" min="30" max="300" value={bpm} onChange={event => updateBpm(Number(event.target.value))}/></label><label>한 마디 박자<select value={beatsPerMeasure} onChange={event => updateBeatsPerMeasure(Number(event.target.value))}>{[2,3,4,5,6,7,8,9,10,11,12].map(beats => <option key={beats} value={beats}>{beats}박</option>)}</select></label></div>
+                <label className={styles.offset}>악보 첫 마디 시작 시간 (초)<input type="number" inputMode="decimal" min="0" step="0.1" value={offset} onFocus={event => event.currentTarget.select()} onChange={event => { const value = Number(event.target.value); if (!Number.isFinite(value) || value < 0) return; setOffset(value); storeMetadata({ offset: value }); }}/></label>
+                <p>음원과 악보가 어긋날 때만 조절하세요. 설정은 이 곡에 자동 저장됩니다.</p>
+              </fieldset></details>
+            </div>
+            <div className={styles.videoArea}><div className={styles.miniPlayer} hidden={!videoId}><div ref={playerHostRef}/></div>{!videoId && <div className={styles.videoPlaceholder}><span aria-hidden="true">▷</span><p>연결한 영상이<br/>여기에 표시됩니다</p></div>}</div>
+          </div>
+        </section>
+      </div>
+    </footer>
   </main>;
 }

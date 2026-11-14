@@ -4,8 +4,9 @@ const fs = require('node:fs');
 const ts = require('typescript');
 
 const source = ts.createSourceFile('page.tsx', fs.readFileSync(require.resolve('../app/score-sync/page.tsx'), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-let reset, poll, jump, cancel, editUrl;
+let reset, poll, jump, cancel, editUrl, persist;
 function visit(node) {
+  if (ts.isVariableDeclaration(node) && node.name.getText(source) === 'storeMetadata') persist = node.initializer.getText(source);
   if (ts.isVariableDeclaration(node) && node.name.getText(source) === 'disconnectYoutube') reset = node.initializer.getText(source);
   if (ts.isVariableDeclaration(node) && node.name.getText(source) === 'updateYoutubeUrl') editUrl = node.initializer.getText(source);
   if (ts.isVariableDeclaration(node) && node.name.getText(source) === 'cancelCountdown') cancel = node.initializer.getText(source);
@@ -15,6 +16,36 @@ function visit(node) {
   ts.forEachChild(node, visit);
 }
 visit(source);
+
+test('song saves retain unsaved status across switches and ignore superseded save results', async () => {
+  const pending = [], errors = [];
+  let unsaved = new Set();
+  const env = {
+    currentSongRef: { current: { id: 'first', youtubeUrl: 'video-a', bpm: 115 } },
+    saveVersionRef: { current: 0 }, pendingSavesRef: { current: new Map() },
+    setSongs: () => {}, setSaveError: message => errors.push(message),
+    setUnsavedIds: update => { unsaved = update(unsaved); },
+    saveSong: song => new Promise((resolve, reject) => pending.push({ song, resolve, reject })),
+  };
+  const compiled = ts.transpileModule(`const persist = ${persist};`, { compilerOptions: { target: ts.ScriptTarget.ES2020 } }).outputText;
+  const save = new Function(...Object.keys(env), `${compiled}; return persist;`)(...Object.values(env));
+  const flush = () => new Promise(resolve => setImmediate(resolve));
+  save({ bpm: 116 }); save({ offset: 2.5 });
+  pending[0].reject(Error('old write failed')); await flush();
+  assert.deepEqual(errors, []);
+  assert.ok(unsaved.has('first'));
+  assert.equal(pending[1].song.youtubeUrl, 'video-a');
+  pending[1].reject(Error('storage full')); await flush();
+  assert.ok(errors.at(-1));
+  env.currentSongRef.current = { id: 'second', youtubeUrl: 'video-b', bpm: 92 };
+  save({}); pending[2].resolve(); await flush();
+  assert.ok(unsaved.has('first'));
+  assert.equal(unsaved.has('second'), false);
+  env.currentSongRef.current = pending[1].song;
+  save({}); pending[3].resolve(); await flush();
+  assert.equal(unsaved.size, 0);
+  assert.equal(errors.at(-1), '');
+});
 const js = ts.transpileModule(`const reset = ${reset};`, { compilerOptions: { target: ts.ScriptTarget.ES2020 } }).outputText;
 
 function bindCancel(env) {
@@ -27,7 +58,7 @@ function session(storageFails = false) {
   const cleared = [];
   const metadata = { youtubeUrl: 'https://youtu.be/abcdefghijk', fileName: 'score.pdf' };
   const env = {
-    stopCountIn: () => {}, speakCountIn: () => {},
+    stopCountIn: () => {}, speakCountIn: () => {}, setExpanded: () => {},
     countdownTimerRef: { current: 42 }, desiredPlayingRef: { current: true }, playerReadyRef: { current: true },
     lastSelectedTargetRef: { current: 90 }, youtubeRetryRef: { current: 1 },
     window: { clearInterval: id => cleared.push(id) },
@@ -53,7 +84,7 @@ test('disconnecting cancels a pending measure jump and removes the saved video',
   assert.equal(state.Countdown, null);
   assert.equal(state.Time, 0);
   assert.equal(state.Offset, 0);
-  assert.deepEqual(metadata, { youtubeUrl: '', fileName: 'score.pdf' });
+  assert.deepEqual(metadata, { youtubeUrl: '', fileName: 'score.pdf', offset: 0 });
   disconnect();
   assert.deepEqual(cleared, [42]);
 });
@@ -66,6 +97,15 @@ test('storage failure still disconnects playback and reports that the old link c
   assert.equal(env.desiredPlayingRef.current, false);
   assert.equal(env.countdownTimerRef.current, null);
   assert.match(state.Error, /저장 공간/);
+});
+
+test('switching songs stops the current session without erasing its saved YouTube link', () => {
+  const { disconnect, metadata, env, state } = session();
+  disconnect(false);
+  assert.equal(metadata.youtubeUrl, 'https://youtu.be/abcdefghijk');
+  assert.equal(state.VideoId, null);
+  assert.equal(env.countdownTimerRef.current, null);
+  assert.equal(env.desiredPlayingRef.current, false);
 });
 
 test('delayed YouTube seek samples cannot replace the selected measure during its countdown', () => {
