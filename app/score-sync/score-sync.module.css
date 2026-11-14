@@ -32,7 +32,7 @@
 .grip svg { transition: transform .15s ease; }
 .grip[aria-expanded="true"] svg { transform: rotate(180deg); }
 .transport { max-width: 1100px; margin: auto; display: flex; gap: 16px; align-items: center; padding: 4px 24px 13px; }
-.playButton { width: 48px; height: 48px; flex-shrink: 0; padding: 0; border: 0; border-radius: 50%; background: #344a3b; color: white; font-size: 18px !important; }
+.playButton { display: grid; place-items: center; width: 48px; height: 48px; flex-shrink: 0; padding: 0; border: 0; border-radius: 50%; background: #344a3b; color: white; }
 .playButton:hover { background: #253c2d; }
 .nowPlaying { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
 .nowPlaying strong { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -58,7 +58,6 @@
 .miniPlayer { width: 240px; height: 200px; flex-shrink: 0; background: #20251f; border-radius: 10px; overflow: hidden; }
 .miniPlayer iframe { width: 100%; height: 200px; display: block; }
 .videoPlaceholder { width: 240px; height: 200px; display: flex; flex-direction: column; align-items: center; justify-content: center; border: 1px dashed #d5d9c9; border-radius: 10px; color: #69745f; background: #f4f5ed; }
-.videoPlaceholder > span { font-size: 34px; }
 .videoPlaceholder p { text-align: center; font-size: 12px; line-height: 1.7; }
 .syncSettings { margin-top: 24px; border-top: 1px solid #e9eadd; padding-top: 16px; }
 .syncSettings summary { cursor: pointer; font-size: 13px; color: #55614c; padding: 6px 0; }

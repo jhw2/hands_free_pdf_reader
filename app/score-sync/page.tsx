@@ -1323,7 +1323,9 @@ export default function ScoreSyncPage() {
         onPointerCancel={() => { dragStartRef.current = null; }}
         onClick={event => { if (!draggedRef.current || event.detail === 0) setExpanded(value => !value); draggedRef.current = false; }}><span><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false"><path d="m6 15 6-6 6 6"/></svg></span></button>
       <div className={styles.transport}>
-        <button data-analytics-click={countdown !== null ? "score_countdown_cancel_click" : playing ? "score_pause_click" : "score_play_click"} className={styles.playButton} onClick={togglePlayback} disabled={!readyToPlay || loading || restoring || deleting} aria-label={t(playing ? "일시 정지" : "재생")}>{playing ? "Ⅱ" : "▶"}</button>
+        <button data-analytics-click={countdown !== null ? "score_countdown_cancel_click" : playing ? "score_pause_click" : "score_play_click"} className={styles.playButton} onClick={togglePlayback} disabled={!readyToPlay || loading || restoring || deleting} aria-label={t(playing ? "일시 정지" : "재생")}>
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" aria-hidden="true" focusable="false">{playing ? <><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></> : <path d="M8 5v14l11-7z"/>}</svg>
+        </button>
         <div className={styles.nowPlaying}><strong>{title || t("새로운 연습을 시작하세요")}</strong><span>{saveError ? t("저장 확인 필요 · 메뉴에서 다시 저장해 주세요") : loading ? t("악보 분석 중") : countdown !== null ? t("선택한 마디에서 시작할 준비 중") : !fileName ? t("PDF 악보를 먼저 열어주세요") : !videoId ? t("메뉴에서 YouTube 링크를 연결하세요") : !playerReady ? t("YouTube 연결 중") : activeIndex >= 0 ? t("{number}마디 · {step}/{total}", { number: activeIndex + 1, step: playbackStep + 1, total: playbackOrder.length }) : t("재생 준비 완료")}</span></div>
         {videoId && <span className={styles.clock}>{formatTime(time)} <span>/ {formatTime(duration)}</span></span>}
       </div>
@@ -1350,7 +1352,7 @@ export default function ScoreSyncPage() {
               </fieldset></details>
               {measures.length > 0 && <NavigationEditor key={currentSongRef.current?.id} measures={measures} saved={navigationEdits} disabled={loading || restoring || deleting} onSave={saveNavigationEdits}/>}
             </div>
-            <div className={styles.videoArea}><div className={styles.miniPlayer} hidden={!videoId}><div ref={playerHostRef}/></div>{!videoId && <div className={styles.videoPlaceholder}><span aria-hidden="true">▷</span><p>{t("연결한 영상이 여기에 표시됩니다")}</p></div>}</div>
+            <div className={styles.videoArea}><div className={styles.miniPlayer} hidden={!videoId}><div ref={playerHostRef}/></div>{!videoId && <div className={styles.videoPlaceholder}><svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" aria-hidden="true" focusable="false"><path d="M8 5v14l11-7z"/></svg><p>{t("연결한 영상이 여기에 표시됩니다")}</p></div>}</div>
           </div>
         </section>
       </div>
