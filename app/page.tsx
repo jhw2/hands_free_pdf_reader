@@ -578,6 +578,11 @@ export default function Home() {
     };
   }, [cameraEnabled]);
 
+  const changeLanguage = async (next: "ko" | "en") => {
+    if (currentPdfBlobRef.current && !(await persistCurrentPdf())) return;
+    chooseLanguage(next);
+  };
+
   const onFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -1102,10 +1107,10 @@ export default function Home() {
       <header className="topbar">
         <div className="brand-block"><h1>{t("입으로 넘기는 악보")}</h1><p>{t("손은 연주에, 페이지는 입으로.")}</p></div>
         <div className="topbar-actions">
-          <Link data-analytics-click="reader_score_sync_click" href="/score-sync" className="score-sync-link">{t("악보 싱크")}</Link>
+          <Link data-analytics-click="reader_score_sync_click" href={`/${language}/score-sync`} className="score-sync-link">{t("악보 싱크")}</Link>
           <label className="language-control">
             <span className="sr-only">{t("언어")}</span>
-            <select data-analytics-change="reader_language_change" value={language} onChange={(event) => chooseLanguage(event.target.value as "ko" | "en")}>
+            <select data-analytics-change="reader_language_change" value={language} onChange={(event) => void changeLanguage(event.target.value as "ko" | "en")}>
               <option value="ko" lang="ko">한국어</option>
               <option value="en" lang="en">English</option>
             </select>

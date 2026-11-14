@@ -6,7 +6,7 @@ const compiled = ts.transpileModule(fs.readFileSync('app/api/youtube/search/rout
 function route(key, fetch) {
   const exports = {};
   new Function('exports', 'process', 'fetch', compiled)(exports, { env: { YOUTUBE_API_KEY: key } }, fetch);
-  return q => exports.GET(new Request(`https://example.com/api/youtube/search?q=${encodeURIComponent(q)}`));
+  return (q, language = 'ko') => exports.GET(new Request(`https://example.com/api/youtube/search?q=${encodeURIComponent(q)}&lang=${encodeURIComponent(language)}`));
 }
 test('validates query and reports missing configuration without requesting YouTube', async () => {
   const get = route('', () => assert.fail('must not fetch'));
@@ -32,14 +32,26 @@ test('handles quota failures, network errors, empty and malformed responses', as
   }
   assert.deepEqual(await (await route('secret', async () => Response.json({ items: [] }))('어른')).json(), { videos: [] });
 });
+test('search relevance follows the supported UI language', async () => {
+  for (const [language, expected] of [['en', 'en'], ['ko', 'ko'], ['fr', 'ko'], ['en&key=other', 'ko']]) {
+    const get = route('secret', async url => {
+      const params = new URL(url).searchParams;
+      assert.equal(params.get('relevanceLanguage'), expected);
+      assert.equal(params.get('key'), 'secret');
+      return Response.json({ items: [] });
+    });
+    assert.equal((await get('Song title', language)).status, 200);
+  }
+});
 test('title input debounces search and discards responses after cleanup', async () => {
   const code = ts.transpileModule(fs.readFileSync('app/score-sync/youtube-search.tsx', 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText;
   let effect, timer, result, resolve, signal;
   const exports = {};
   const hooks = { useState: initial => [initial, value => { result = value; }], useEffect: callback => { effect = callback; } };
-  const requireMock = name => name === 'react' ? hooks : name === 'react/jsx-runtime' ? { jsx: () => null, jsxs: () => null } : {};
+  const requireMock = name => name === 'react' ? hooks : name === 'react/jsx-runtime' ? { jsx: () => null, jsxs: () => null }
+    : name.endsWith('/use-language') ? { useLanguage: () => ({ language: 'en', t: text => text }) } : {};
   new Function('exports', 'require', 'fetch', 'setTimeout', 'clearTimeout', code)(exports, requireMock,
-    (_url, options) => { signal = options.signal; return new Promise(done => { resolve = done; }); },
+    (url, options) => { assert.equal(new URL(url, 'https://example.com').searchParams.get('lang'), 'en'); signal = options.signal; return new Promise(done => { resolve = done; }); },
     (callback, delay) => { assert.equal(delay, 700); timer = callback; return 1; }, () => {});
   const props = { value: '어른', disabled: false, isLink: false, onChange() {}, onConnect() {} };
   exports.default(props);

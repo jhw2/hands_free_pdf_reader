@@ -19,6 +19,26 @@ const deferred = () => {
   const promise = new Promise(done => { resolve = done; });
   return { promise, resolve };
 };
+test('switching language waits for the current PDF to save and stays put if saving fails', async () => {
+  const gate = deferred();
+  const choices = [];
+  const change = actual('changeLanguage', {
+    currentPdfBlobRef: { current: 'unsaved-pdf' }, persistCurrentPdf: () => gate.promise,
+    chooseLanguage: value => choices.push(value),
+  });
+  const pending = change('en');
+  assert.deepEqual(choices, []);
+  gate.resolve(false);
+  await pending;
+  assert.deepEqual(choices, []);
+  for (const blob of [null, 'saved-pdf']) {
+    await actual('changeLanguage', {
+      currentPdfBlobRef: { current: blob }, persistCurrentPdf: async () => true,
+      chooseLanguage: value => choices.push(value),
+    })('en');
+  }
+  assert.deepEqual(choices, ['en', 'en']);
+});
 function storage(write = async () => {}) {
   const env = {
     storageWriteQueueRef: { current: Promise.resolve() }, savedScoresRef: { current: [] },

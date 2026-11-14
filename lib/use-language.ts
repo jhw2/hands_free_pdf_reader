@@ -1,37 +1,41 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { readLanguage, resolveLanguage, saveLanguage, translate, type Language } from "./i18n";
+import { createContext, createElement, useContext, useEffect, type ReactNode } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { saveLanguage, translate, type Language } from "./i18n";
+import { isLanguage, languageCookie, languageFromPathname, localizedPath } from "./locale";
 
-export function useLanguage() {
-  // Match server markup; browser preferences are applied immediately after hydration.
-  const [language, setLanguage] = useState<Language>("en");
+type LanguageValue = {
+  language: Language;
+  chooseLanguage: (language: Language) => void;
+  t: (text: string, values?: Record<string, string | number>) => string;
+};
+const LanguageContext = createContext<LanguageValue>({
+  language: "ko", chooseLanguage: () => {}, t: (text, values) => translate("ko", text, values),
+});
 
-  useEffect(() => {
-    // Accessing localStorage itself can throw in restricted browser contexts.
-    try {
-      setLanguage(readLanguage(navigator.language, window.localStorage));
-    } catch {
-      setLanguage(resolveLanguage(null, navigator.language));
-    }
-  }, []);
+export function LanguageProvider({ initialLanguage, children }: { initialLanguage: Language; children: ReactNode }) {
+  const pathname = usePathname();
+  const router = useRouter();
+  const language = languageFromPathname(pathname) ?? initialLanguage;
 
   useEffect(() => {
     document.documentElement.lang = language;
-    document.title = "Hands-Free Score Reader";
-    document.querySelector('meta[name="description"]')?.setAttribute("content",
-      translate(language, "입모양과 버튼으로 페이지를 넘길 수 있는 핸즈프리 PDF 리더"));
   }, [language]);
 
   const chooseLanguage = (next: Language) => {
-    setLanguage(next);
+    if (!isLanguage(next)) return;
     try {
       saveLanguage(next, window.localStorage);
-    } catch {
-      // Keep the user's choice for this session when storage is unavailable.
-    }
+    } catch { /* Language navigation still works when browser storage is blocked. */ }
+    try {
+      document.cookie = `${languageCookie}=${next}; Path=/; Max-Age=31536000; SameSite=Lax${window.location.protocol === "https:" ? "; Secure" : ""}`;
+    } catch { /* A blocked cookie must not prevent changing the page language. */ }
+    router.replace(`${localizedPath(pathname ?? "/", next)}${window.location.search}${window.location.hash}`, { scroll: false });
   };
 
   const t = (text: string, values?: Record<string, string | number>) => translate(language, text, values);
-  return { language, chooseLanguage, t };
+  return createElement(LanguageContext.Provider, { value: { language, chooseLanguage, t } }, children);
 }
+
+export const useLanguage = () => useContext(LanguageContext);

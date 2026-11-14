@@ -1,3 +1,6 @@
+import { scoreEnglish } from "./score-i18n";
+import { scoreControlsEnglish } from "./score-controls-i18n";
+
 export type Language = "ko" | "en";
 export const LANGUAGE_STORAGE_KEY = "reader-language";
 
@@ -23,6 +26,8 @@ export const saveLanguage = (language: Language, storage: Pick<Storage, "setItem
 };
 
 export const english: Record<string, string> = {
+  ...scoreEnglish,
+  ...scoreControlsEnglish,
   "언어": "Language",
   "페이지: 0 / 0": "Page: 0 / 0",
   "카메라를 준비하고 있어요": "Starting the camera…",
@@ -52,8 +57,8 @@ export const english: Record<string, string> = {
   "지금 한 번 더 벌리세요 · 이전 페이지 ←": "Open once more now · Previous page ←",
   "준비됐어요 · 입을 벌리면 다음 페이지": "Ready · Open your mouth to turn the page",
   "PDF를 먼저 불러와 주세요": "Open a PDF first",
-  "다음 페이지 동작이 인식됐어요!": "Next-page gesture recognized!",
-  "이전 페이지 동작이 인식됐어요!": "Previous-page gesture recognized!",
+  "다음 페이지 동작이 인식됐어요!": "Got it! That’s the next-page gesture.",
+  "이전 페이지 동작이 인식됐어요!": "Got it! That’s the previous-page gesture.",
   "길게 벌려서 다음 페이지 동작으로 인식됐어요. 첫 번째 벌림을 더 짧게 해보세요.": "That was a next-page gesture. Make the first opening shorter, then close and open again.",
   "두 번 벌려서 이전 페이지 동작으로 인식됐어요. 다음 페이지는 입을 벌린 채 유지해주세요.": "That was a previous-page gesture. To go forward, keep your mouth open.",
   "두 번째 벌림을 기다리다 끝났어요. 닫은 뒤 바로 한 번 더 벌려보세요.": "The second opening didn’t arrive in time. Close, then open again right away.",
@@ -115,18 +120,18 @@ export const english: Record<string, string> = {
   "다음 페이지 →": "Next page →",
   "← 이전 페이지": "← Previous page",
   "확대 스크롤": "Zoom & scroll",
-  "확대한 악보는 고개로 위아래 이동하세요": "Move around a zoomed score with your head",
+  "확대한 악보는 고개로 위아래 이동하세요": "Scroll through your score with a tilt of your head",
   "먼저 전체 보기에서 악보를 확대하고 정면을 바라보세요.": "In full view, zoom in first and look straight ahead.",
   "고개는 스크롤, 입은 페이지 이동": "Head movement scrolls; mouth gestures turn pages",
   "으로 동작합니다.": ".",
-  "정면 보기": "Look straight",
+  "정면 보기": "Look straight ahead",
   "중립 위치를 맞춰요": "This sets your neutral position",
   "고개 들기 / 숙이기": "Tilt up / down",
   "악보가 위 / 아래로 움직여요": "The score moves up / down",
   "정면으로 돌아오기": "Return to center",
   "스크롤이 멈춰요": "Scrolling stops",
-  "스크롤할 공간이 있을 때만 동작해요.": "It works only when there is more of the score to scroll.",
-  "가로 화면은 100%에서도, 세로로 긴 악보는 고개로 이동할 수 있습니다.": "In landscape, you can move through a tall score with your head even at 100%.",
+  "스크롤할 공간이 있을 때만 동작해요.": "Head scrolling works when the score is taller than the viewing area.",
+  "가로 화면은 100%에서도, 세로로 긴 악보는 고개로 이동할 수 있습니다.": "In landscape view, tall pages may still scroll at 100% zoom.",
   "입을 벌린 채 잠깐 유지하세요": "Open your mouth and hold briefly",
   "짧게 벌렸다 닫고, 한 번 더": "Open, close, then open once more",
   "{seconds}초 유지": "Hold for {seconds} s",
@@ -144,7 +149,7 @@ export const english: Record<string, string> = {
   "{seconds}초": "{seconds} s",
   "첫 번째 벌림을 길게 유지하면 다음 페이지로 인식돼요. 위 입 모양의 리듬을 참고해주세요.": "Holding the first opening too long turns the page forward. Follow the rhythm shown above.",
   "동작 연습 시작": "Start gesture practice",
-  "내 동작 확인하기": "Try your gesture",
+  "내 동작 확인하기": "Give it a try",
   "연습 중에는 실제 악보가 넘어가지 않아요.": "Your score stays on the same page during practice.",
   "직접 해보기": "Try it yourself",
   "동작 연습": "Gesture practice",

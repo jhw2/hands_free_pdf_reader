@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { PDFPageProxy } from "pdfjs-dist";
 import { compilePlaybackOrder, type NavigationMeasure } from "./navigation";
@@ -10,6 +11,7 @@ import NavigationEditor from "./navigation-editor";
 import { buildNavigationMeasures, navigationEditsMatch, validateNavigationMarkers, type NavigationEdits } from "./navigation-edits";
 import { readLibrary, saveSong, activateSong, deleteSong, type SavedSong } from "./library";
 import { detectTempo, detectImageTempo, resolveTempo } from "./tempo";
+import { useLanguage } from "../../lib/use-language";
 
 type ScoreTextItem = { text: string; x: number; y: number; width: number; height: number; fontName: string; fontFamily?: string };
 type MeasureBox = NavigationMeasure & {
@@ -72,13 +74,13 @@ const getVideoId = (value: string) => {
   } catch { return null; }
 };
 
-const youtubeErrorMessage = (code: number) => {
-  if (code === 2) return "YouTube 링크의 영상 ID가 올바르지 않아요. 링크를 다시 확인해 주세요. (오류 2)";
-  if (code === 5) return "브라우저가 이 영상을 재생하지 못했어요. 같은 링크로 다시 연결해 주세요. (오류 5)";
-  if (code === 100) return "삭제됐거나 비공개인 영상이라 재생할 수 없어요. 다른 공개 영상을 사용해 주세요. (오류 100)";
-  if (code === 101 || code === 150) return `영상 소유자가 외부 재생을 허용하지 않았어요. 다른 영상 링크를 사용해 주세요. (오류 ${code})`;
-  if (code === 153) return "YouTube가 이 페이지의 재생 요청을 확인하지 못했어요. 같은 링크로 다시 연결해 주세요. (오류 153)";
-  return `YouTube 재생 중 오류가 발생했어요. 같은 링크로 다시 연결해 주세요. (오류 ${code})`;
+const youtubeErrorMessage = (code: number, t: (text: string, values?: Record<string, string | number>) => string) => {
+  if (code === 2) return t("YouTube 링크의 영상 ID가 올바르지 않아요. 링크를 다시 확인해 주세요. (오류 2)");
+  if (code === 5) return t("브라우저가 이 영상을 재생하지 못했어요. 같은 링크로 다시 연결해 주세요. (오류 5)");
+  if (code === 100) return t("삭제됐거나 비공개인 영상이라 재생할 수 없어요. 다른 공개 영상을 사용해 주세요. (오류 100)");
+  if (code === 101 || code === 150) return t("영상 소유자가 외부 재생을 허용하지 않았어요. 다른 영상 링크를 사용해 주세요. (오류 {code})", { code });
+  if (code === 153) return t("YouTube가 이 페이지의 재생 요청을 확인하지 못했어요. 같은 링크로 다시 연결해 주세요. (오류 153)");
+  return t("YouTube 재생 중 오류가 발생했어요. 같은 링크로 다시 연결해 주세요. (오류 {code})", { code });
 };
 
 const shouldRetryYoutubeError = (code: number, attempts: number, playbackPending: boolean) =>
@@ -726,6 +728,7 @@ function findMeasures(canvas: HTMLCanvasElement, page: number, textItems: ScoreT
 }
 
 export default function ScoreSyncPage() {
+  const { language, chooseLanguage, t } = useLanguage();
   useEffect(() => {
     try { window.speechSynthesis?.getVoices(); } catch { /* Visual countdown remains available. */ }
   }, []);
@@ -760,7 +763,7 @@ export default function ScoreSyncPage() {
   const [countdownMeasure, setCountdownMeasure] = useState<number | null>(null);
   const [playerReady, setPlayerReady] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<string | number>("");
   const playerHostRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<YoutubePlayer | null>(null);
   const countdownTimerRef = useRef<number | null>(null);
@@ -901,7 +904,7 @@ export default function ScoreSyncPage() {
         width: "200",
         height: "200",
         videoId,
-        playerVars: { rel: 0, playsinline: 1, enablejsapi: 1, origin: window.location.origin },
+        playerVars: { rel: 0, playsinline: 1, enablejsapi: 1, hl: language, origin: window.location.origin },
         events: {
           onReady: () => {
             if (disposed) return;
@@ -930,7 +933,7 @@ export default function ScoreSyncPage() {
               }, 600);
               return;
             }
-            setError(youtubeErrorMessage(event.data));
+            setError(event.data);
           },
           onAutoplayBlocked: () => {
             if (disposed) return;
@@ -1088,7 +1091,7 @@ export default function ScoreSyncPage() {
   };
 
   const removeSong = async (song: SavedSong) => {
-    if (!window.confirm(`‘${song.fileName}’을 보관함에서 삭제할까요?`)) return;
+    if (!window.confirm(t("‘{name}’을 보관함에서 삭제할까요?", { name: song.fileName }))) return;
     setDeleting(true);
     try {
       await deleteSong(song.id);
@@ -1295,56 +1298,59 @@ export default function ScoreSyncPage() {
   const openFile = () => fileInputRef.current?.click();
 
   return <main className={styles.shell}>
-    <input data-analytics-change="score_pdf_select" ref={fileInputRef} type="file" accept="application/pdf" onChange={loadPdf} hidden disabled={loading || restoring || deleting} aria-label="악보 PDF 선택"/>
-    {error && <p className={styles.error} role="alert">{error}</p>}
-    {!error && !loading && !restoring && showNavigationWarning && <p className={styles.warning} role="status">반복 경로를 확정하지 못해 악보 순서대로 표시합니다.</p>}
-    <section className={styles.scorePanel} aria-label="악보">
+    <input data-analytics-change="score_pdf_select" ref={fileInputRef} type="file" accept="application/pdf" onChange={loadPdf} hidden disabled={loading || restoring || deleting} aria-label={t("악보 PDF 선택")}/>
+    {error && <p className={styles.error} role="alert">{typeof error === "number" ? youtubeErrorMessage(error, t) : t(error)}</p>}
+    {!error && !loading && !restoring && showNavigationWarning && <p className={styles.warning} role="status">{t("반복 경로를 확정하지 못해 악보 순서대로 표시합니다.")}</p>}
+    <section className={styles.scorePanel} aria-label={t("악보")}>
       <div className={styles.pages}>
-        {loading || restoring ? <div className={styles.empty} role="status"><span className={styles.spinner}/><h2>{restoring ? "보관함을 열고 있어요" : "악보에서 마디를 찾고 있어요"}</h2><p>준비가 끝나면 원하는 마디부터 연습할 수 있어요.</p></div> : !pages.length ? <div className={styles.empty}>
-          <span className={styles.eyebrow}>악보와 음악, 한곳에서</span>
+        {loading ? <div className={styles.empty} role="status"><span className={styles.spinner}/><h2>{t("악보에서 마디를 찾고 있어요")}</h2><p>{t("준비가 끝나면 원하는 마디부터 연습할 수 있어요.")}</p></div> : !pages.length ? <div className={styles.empty}>
+          <span className={styles.eyebrow}>{t("악보와 음악, 한곳에서")}</span>
           <div className={styles.note} aria-hidden="true">♫</div>
-          <h1>오늘 연습할 곡을<br/>열어보세요.</h1>
-          <p>악보와 YouTube를 연결하면<br/>음악에 맞춰 지금 연주할 마디를 보여드려요.</p>
-          <button data-analytics-click="score_pdf_open_click" className={styles.primaryButton} onClick={openFile}>＋ 악보 PDF 열기</button>
-          {songs.length > 0 && <button data-analytics-click="score_library_toggle_click" className={styles.textButton} onClick={() => { setExpanded(true); setLibraryOpen(true); }}>악보 목록에서 선택하기 · {songs.length}곡</button>}
-          <div className={styles.steps}><span><b>1</b> 악보 열기</span><span><b>2</b> YouTube 연결</span><span><b>3</b> 원하는 마디부터</span></div>
-        </div> : pages.map((src, pageIndex) => <div className={styles.page} key={src}><img src={src} alt={`악보 ${pageIndex + 1}페이지`}/>{measures.map((box, index) => box.page === pageIndex + 1 && <button data-analytics-click="score_measure_click" key={box.id} data-current={index === activeIndex ? "true" : undefined} onClick={() => jumpToMeasure(index)} className={`${styles.system} ${index === activeIndex ? styles.active : ""}`} style={{ top: `${box.top}%`, left: `${box.left}%`, width: `${box.width}%`, height: `${box.height}%` }} aria-label={`${index + 1}번 마디로 이동`}><span aria-hidden="true">{index + 1}</span>{countdown !== null && countdownMeasure === index ? <b className={styles.measureCountdown} role="timer" aria-live="assertive" aria-label={countdown === 0 ? "재생 위치 확인 중" : undefined}>{countdown === 0 ? "…" : 5 - countdown}</b> : null}</button>)}</div>)}
+          <h1>{t("YouTube와 함께하는")}<br/>{t("PDF 악보 연습")}</h1>
+          <p>{t("PDF 악보의 마디를 음악에 맞춰 표시해요.")}<br/>{t("원하는 마디를 눌러 4초 카운트 후 연습하세요.")}</p>
+          <button data-analytics-click="score_pdf_open_click" className={styles.primaryButton} onClick={openFile} disabled={restoring || deleting}>{t("＋ 악보 PDF 열기")}</button>
+          {songs.length > 0 && <button data-analytics-click="score_library_toggle_click" className={styles.textButton} onClick={() => { setExpanded(true); setLibraryOpen(true); }}>{t("악보 목록에서 선택하기 · {count}곡", { count: songs.length })}</button>}
+          <div className={styles.steps}><span><b>1</b> {t("악보 열기")}</span><span><b>2</b> {t("YouTube 연결")}</span><span><b>3</b> {t("원하는 마디부터")}</span></div>
+          <Link className={styles.readerLink} href={`/${language}`}>{t("입으로 넘기는 PDF 악보 보기 →")}</Link>
+          {restoring && <span role="status">{t("보관함을 열고 있어요")}</span>}
+        </div> : pages.map((src, pageIndex) => <div className={styles.page} key={src}><img src={src} alt={t("악보 {page}페이지", { page: pageIndex + 1 })}/>{measures.map((box, index) => box.page === pageIndex + 1 && <button data-analytics-click="score_measure_click" key={box.id} data-current={index === activeIndex ? "true" : undefined} onClick={() => jumpToMeasure(index)} className={`${styles.system} ${index === activeIndex ? styles.active : ""}`} style={{ top: `${box.top}%`, left: `${box.left}%`, width: `${box.width}%`, height: `${box.height}%` }} aria-label={t("{number}번 마디로 이동", { number: index + 1 })}><span aria-hidden="true">{index + 1}</span>{countdown !== null && countdownMeasure === index ? <b className={styles.measureCountdown} role="timer" aria-live="assertive" aria-label={countdown === 0 ? t("재생 위치 확인 중") : undefined}>{countdown === 0 ? "…" : 5 - countdown}</b> : null}</button>)}</div>)}
       </div>
     </section>
-    <footer className={styles.dock} aria-label="연습 메뉴">
-      <button data-analytics-click="score_menu_toggle_click" className={styles.grip} title={expanded ? "메뉴 접기" : "메뉴 펼치기"} aria-label={expanded ? "메뉴 접기" : "메뉴 펼치기"} aria-expanded={expanded} aria-controls="practice-menu"
+    <footer className={styles.dock} aria-label={t("연습 메뉴")}>
+      <button data-analytics-click="score_menu_toggle_click" className={styles.grip} title={t(expanded ? "메뉴 접기" : "메뉴 펼치기")} aria-label={t(expanded ? "메뉴 접기" : "메뉴 펼치기")} aria-expanded={expanded} aria-controls="practice-menu"
         onPointerDown={event => { dragStartRef.current = event.clientY; draggedRef.current = false; event.currentTarget.setPointerCapture(event.pointerId); }}
         onPointerUp={event => { if (dragStartRef.current !== null && Math.abs(event.clientY - dragStartRef.current) > 24) { setExpanded(event.clientY < dragStartRef.current); draggedRef.current = true; } dragStartRef.current = null; }}
         onPointerCancel={() => { dragStartRef.current = null; }}
         onClick={event => { if (!draggedRef.current || event.detail === 0) setExpanded(value => !value); draggedRef.current = false; }}><span><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false"><path d="m6 15 6-6 6 6"/></svg></span></button>
       <div className={styles.transport}>
-        <button data-analytics-click={countdown !== null ? "score_countdown_cancel_click" : playing ? "score_pause_click" : "score_play_click"} className={styles.playButton} onClick={togglePlayback} disabled={!readyToPlay || loading || restoring || deleting} aria-label={playing ? "일시 정지" : "재생"}>{playing ? "Ⅱ" : "▶"}</button>
-        <div className={styles.nowPlaying}><strong>{title || "새로운 연습을 시작하세요"}</strong><span>{saveError ? "저장 확인 필요 · 메뉴에서 다시 저장해 주세요" : loading ? "악보 분석 중" : countdown !== null ? "선택한 마디에서 시작할 준비 중" : !fileName ? "PDF 악보를 먼저 열어주세요" : !videoId ? "메뉴에서 YouTube 링크를 연결하세요" : !playerReady ? "YouTube 연결 중" : activeIndex >= 0 ? `${activeIndex + 1}마디 · ${playbackStep + 1}/${playbackOrder.length}` : "재생 준비 완료"}</span></div>
+        <button data-analytics-click={countdown !== null ? "score_countdown_cancel_click" : playing ? "score_pause_click" : "score_play_click"} className={styles.playButton} onClick={togglePlayback} disabled={!readyToPlay || loading || restoring || deleting} aria-label={t(playing ? "일시 정지" : "재생")}>{playing ? "Ⅱ" : "▶"}</button>
+        <div className={styles.nowPlaying}><strong>{title || t("새로운 연습을 시작하세요")}</strong><span>{saveError ? t("저장 확인 필요 · 메뉴에서 다시 저장해 주세요") : loading ? t("악보 분석 중") : countdown !== null ? t("선택한 마디에서 시작할 준비 중") : !fileName ? t("PDF 악보를 먼저 열어주세요") : !videoId ? t("메뉴에서 YouTube 링크를 연결하세요") : !playerReady ? t("YouTube 연결 중") : activeIndex >= 0 ? t("{number}마디 · {step}/{total}", { number: activeIndex + 1, step: playbackStep + 1, total: playbackOrder.length }) : t("재생 준비 완료")}</span></div>
         {videoId && <span className={styles.clock}>{formatTime(time)} <span>/ {formatTime(duration)}</span></span>}
       </div>
       <div className={styles.progress} aria-hidden="true"><span style={{ width: `${Math.min(100, time / duration * 100)}%` }}/></div>
       <div id="practice-menu" className={styles.drawerBody} hidden={!expanded}>
-        <div className={styles.menuHeading}><button data-analytics-click="score_library_toggle_click" className={styles.secondaryButton} aria-pressed={libraryOpen} onClick={() => setLibraryOpen(value => !value)}>악보 목록</button><button data-analytics-click="score_pdf_open_click" className={styles.primaryButton} onClick={openFile} disabled={loading || restoring || deleting}>＋ 새 악보 추가</button></div>
-        {saveError && <div className={styles.saveError} role="alert"><span>{saveError}</span>{currentSongRef.current && <button data-analytics-click="score_save_retry_click" onClick={() => storeMetadata({})}>다시 저장</button>}</div>}
-        <section hidden={!libraryOpen} aria-label="악보 목록">
-          {!songs.length ? <p className={styles.libraryEmpty}>아직 저장한 곡이 없어요. 첫 악보를 추가해 보세요.</p> : <ul className={styles.songList}>{songs.map(song => <li key={song.id} className={song.id === currentSongRef.current?.id ? styles.selectedSong : ""}>
-            <button data-analytics-click="score_library_select_click" className={styles.songSelect} disabled={loading || restoring || deleting} onClick={() => void selectSong(song)} aria-current={song.id === currentSongRef.current?.id ? "true" : undefined}><span className={styles.songIcon} aria-hidden="true">♫</span><span><strong>{song.fileName.replace(/\.pdf$/i, "")}</strong><small>{unsavedIds.has(song.id) ? "저장 필요 · " : ""}{song.youtubeUrl ? "YouTube 연결됨" : "YouTube 미연결"} · {song.bpm} BPM{song.id === currentSongRef.current?.id ? " · 현재 곡" : ""}</small></span></button>
-            <button data-analytics-click="score_library_delete_click" className={styles.deleteButton} onClick={() => void removeSong(song)} disabled={loading || restoring || deleting} aria-label={`${song.fileName} 삭제`}>삭제</button>
+        <div className={styles.menuTools}><label>{t("언어")}<select data-analytics-change="score_language_change" value={language} disabled={loading || restoring || deleting || unsavedIds.size > 0} title={unsavedIds.size ? t("저장 후 언어를 바꿀 수 있어요.") : undefined} onChange={event => chooseLanguage(event.target.value as "ko" | "en")}><option value="ko" lang="ko">한국어</option><option value="en" lang="en">English</option></select></label></div>
+        <div className={styles.menuHeading}><button data-analytics-click="score_library_toggle_click" className={styles.secondaryButton} aria-pressed={libraryOpen} onClick={() => setLibraryOpen(value => !value)}>{t("악보 목록")}</button><button data-analytics-click="score_pdf_open_click" className={styles.primaryButton} onClick={openFile} disabled={loading || restoring || deleting}>{t("＋ 새 악보 추가")}</button></div>
+        {saveError && <div className={styles.saveError} role="alert"><span>{t(saveError)}</span>{currentSongRef.current && <button data-analytics-click="score_save_retry_click" onClick={() => storeMetadata({})}>{t("다시 저장")}</button>}</div>}
+        <section hidden={!libraryOpen} aria-label={t("악보 목록")}>
+          {!songs.length ? <p className={styles.libraryEmpty}>{t("아직 저장한 곡이 없어요. 첫 악보를 추가해 보세요.")}</p> : <ul className={styles.songList}>{songs.map(song => <li key={song.id} className={song.id === currentSongRef.current?.id ? styles.selectedSong : ""}>
+            <button data-analytics-click="score_library_select_click" className={styles.songSelect} disabled={loading || restoring || deleting} onClick={() => void selectSong(song)} aria-current={song.id === currentSongRef.current?.id ? "true" : undefined}><span className={styles.songIcon} aria-hidden="true">♫</span><span><strong>{song.fileName.replace(/\.pdf$/i, "")}</strong><small>{unsavedIds.has(song.id) ? `${t("저장 필요")} · ` : ""}{t(song.youtubeUrl ? "YouTube 연결됨" : "YouTube 미연결")} · {song.bpm} BPM{song.id === currentSongRef.current?.id ? ` · ${t("현재 곡")}` : ""}</small></span></button>
+            <button data-analytics-click="score_library_delete_click" className={styles.deleteButton} onClick={() => void removeSong(song)} disabled={loading || restoring || deleting} aria-label={t("{name} 삭제", { name: song.fileName })}>{t("삭제")}</button>
           </li>)}</ul>}
-          <p className={styles.storageNote}>이 브라우저에 저장됩니다. 브라우저 데이터를 지우면 보관함도 삭제돼요.</p>
+          <p className={styles.storageNote}>{t("이 브라우저에 저장됩니다. 브라우저 데이터를 지우면 보관함도 삭제돼요.")}</p>
         </section>
-        <section hidden={libraryOpen} aria-label="현재 곡 설정">
+        <section hidden={libraryOpen} aria-label={t("현재 곡 설정")}>
           <div className={styles.setupGrid}>
             <div className={styles.connection}><YoutubeSearch value={url} disabled={!pages.length || loading || restoring || deleting} isLink={!!getVideoId(url)} onChange={updateYoutubeUrl} onConnect={attachYoutube}/>
-              {readyToPlay && <p className={styles.readyHint}>● 연결됐어요. 재생 버튼을 누르거나 악보의 마디를 눌러보세요.</p>}
-              <details className={styles.syncSettings} open><summary data-analytics-click="score_sync_toggle_click">싱크 조절 <span>BPM · 박자 · 시작 시간</span></summary><fieldset disabled={!pages.length || loading || restoring || deleting}>
-                <div className={styles.settingsRow}><label>{tempoDetected ? "감지한 BPM" : "BPM"}<input data-analytics-change="score_bpm_change" type="number" min="30" max="300" value={bpm} onChange={event => updateBpm(Number(event.target.value))}/></label><label>한 마디 박자<select data-analytics-change="score_beats_change" value={beatsPerMeasure} onChange={event => updateBeatsPerMeasure(Number(event.target.value))}>{[2,3,4,5,6,7,8,9,10,11,12].map(beats => <option key={beats} value={beats}>{beats}박</option>)}</select></label>
-                <label>첫 마디 시작 (초)<input data-analytics-change="score_offset_change" aria-label="악보 첫 마디 시작 시간 (초)" type="number" inputMode="decimal" min="0" step="0.1" value={offset} onFocus={event => event.currentTarget.select()} onChange={event => { const value = Number(event.target.value); if (!Number.isFinite(value) || value < 0) return; setOffset(value); storeMetadata({ offset: value }); }}/></label></div>
-                <p>음원과 악보가 어긋날 때만 조절하세요. 설정은 이 곡에 자동 저장됩니다.</p>
+              {readyToPlay && <p className={styles.readyHint}>{t("● 연결됐어요. 재생 버튼을 누르거나 악보의 마디를 눌러보세요.")}</p>}
+              <details className={styles.syncSettings} open><summary data-analytics-click="score_sync_toggle_click">{t("싱크 조절")} <span>{t("BPM · 박자 · 시작 시간")}</span></summary><fieldset disabled={!pages.length || loading || restoring || deleting}>
+                <div className={styles.settingsRow}><label>{t(tempoDetected ? "감지한 BPM" : "BPM")}<input data-analytics-change="score_bpm_change" type="number" min="30" max="300" value={bpm} onChange={event => updateBpm(Number(event.target.value))}/></label><label>{t("한 마디 박자")}<select data-analytics-change="score_beats_change" value={beatsPerMeasure} onChange={event => updateBeatsPerMeasure(Number(event.target.value))}>{[2,3,4,5,6,7,8,9,10,11,12].map(beats => <option key={beats} value={beats}>{t("{beats}박", { beats })}</option>)}</select></label>
+                <label>{t("첫 마디 시작 (초)")}<input data-analytics-change="score_offset_change" aria-label={t("악보 첫 마디 시작 시간 (초)")} type="number" inputMode="decimal" min="0" step="0.1" value={offset} onFocus={event => event.currentTarget.select()} onChange={event => { const value = Number(event.target.value); if (!Number.isFinite(value) || value < 0) return; setOffset(value); storeMetadata({ offset: value }); }}/></label></div>
+                <p>{t("음원과 악보가 어긋날 때만 조절하세요. 설정은 이 곡에 자동 저장됩니다.")}</p>
               </fieldset></details>
               {measures.length > 0 && <NavigationEditor key={currentSongRef.current?.id} measures={measures} saved={navigationEdits} disabled={loading || restoring || deleting} onSave={saveNavigationEdits}/>}
             </div>
-            <div className={styles.videoArea}><div className={styles.miniPlayer} hidden={!videoId}><div ref={playerHostRef}/></div>{!videoId && <div className={styles.videoPlaceholder}><span aria-hidden="true">▷</span><p>연결한 영상이<br/>여기에 표시됩니다</p></div>}</div>
+            <div className={styles.videoArea}><div className={styles.miniPlayer} hidden={!videoId}><div ref={playerHostRef}/></div>{!videoId && <div className={styles.videoPlaceholder}><span aria-hidden="true">▷</span><p>{t("연결한 영상이 여기에 표시됩니다")}</p></div>}</div>
           </div>
         </section>
       </div>

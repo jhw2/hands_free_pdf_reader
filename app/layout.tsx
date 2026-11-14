@@ -1,19 +1,22 @@
 import type { Metadata } from "next";
 import { Analytics } from "@vercel/analytics/next";
+import { headers } from "next/headers";
 import InteractionAnalytics from "./interaction-analytics";
+import { siteUrl } from "../lib/seo";
+import { LanguageProvider } from "../lib/use-language";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Hands-Free Score Reader",
-  description: "A hands-free PDF score reader. Turn pages with mouth gestures or on-screen controls.",
+  metadataBase: new URL(siteUrl),
   referrer: "strict-origin-when-cross-origin",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
+  const language = headers().get("x-site-language") === "en" ? "en" : "ko";
   return (
-    <html lang="en">
+    <html lang={language}>
       <body>
-        {children}
+        <LanguageProvider initialLanguage={language}>{children}</LanguageProvider>
         <Analytics />
         <InteractionAnalytics />
       </body>
