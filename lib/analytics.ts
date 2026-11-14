@@ -1,3 +1,5 @@
+import { siteUrl } from "./seo";
+
 // Public GA4 destination linked to the supplied GTM-TG86F7CB Google tag.
 export const gaMeasurementId = "G-GSVS893CJ5";
 
@@ -7,8 +9,12 @@ declare global {
   }
 }
 
+export function isAnalyticsEnabled() {
+  return typeof window !== "undefined" && process.env.NODE_ENV === "production" && window.location.origin === siteUrl;
+}
+
 export function trackInteraction(name: string) {
-  if (typeof window === "undefined" || !/^(score|reader)_[a-z_]{1,32}$/.test(name)) return;
+  if (!isAnalyticsEnabled() || !/^(score|reader)_[a-z_]{1,32}$/.test(name)) return;
   try {
     // Event names are fixed in code. Never include file names, searches, URLs, or field values.
     window.gtag?.("event", name, { send_to: gaMeasurementId });

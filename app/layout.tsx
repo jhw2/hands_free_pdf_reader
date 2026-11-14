@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { Analytics } from "@vercel/analytics/next";
 import { headers } from "next/headers";
 import InteractionAnalytics from "./interaction-analytics";
 import { siteUrl } from "../lib/seo";
@@ -17,7 +16,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang={language}>
       <body>
         <LanguageProvider initialLanguage={language}>{children}</LanguageProvider>
-        <Analytics />
         <InteractionAnalytics />
       </body>
     </html>

@@ -1,11 +1,15 @@
 "use client";
 
 import Script from "next/script";
-import { useEffect } from "react";
-import { gaMeasurementId, recordInteraction } from "../lib/analytics";
+import { Analytics } from "@vercel/analytics/next";
+import { useEffect, useState } from "react";
+import { gaMeasurementId, isAnalyticsEnabled, recordInteraction } from "../lib/analytics";
 
 export default function InteractionAnalytics() {
+  const [enabled, setEnabled] = useState(false);
   useEffect(() => {
+    if (!isAnalyticsEnabled()) return;
+    setEnabled(true);
     // Capture the action before React changes a play button into a pause button.
     document.addEventListener("click", recordInteraction, true);
     document.addEventListener("change", recordInteraction, true);
@@ -15,7 +19,9 @@ export default function InteractionAnalytics() {
     };
   }, []);
 
+  if (!enabled) return null;
   return <>
+    <Analytics />
     <Script id="ga-interactions-init" strategy="afterInteractive">{`
       window.dataLayer = window.dataLayer || [];
       window.gtag = window.gtag || function(){window.dataLayer.push(arguments);};

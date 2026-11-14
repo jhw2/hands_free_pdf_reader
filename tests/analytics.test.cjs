@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const { test } = require('node:test');
 const fs = require('node:fs');
 const ts = require('typescript');
+const origin = 'https://handsfreepdfreader.vercel.app';
 const js = ts.transpileModule(fs.readFileSync('lib/analytics.ts', 'utf8'), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText;
@@ -19,13 +20,65 @@ class Element {
 }
 class HTMLInputElement extends Element {}
 
-function analytics(browser) {
+function analytics(browser, environment = 'production') {
   const calls = [];
-  const window = browser ?? { gtag: (...args) => calls.push(args) };
+  const window = { location: { origin }, ...(browser ?? { gtag: (...args) => calls.push(args) }) };
   const exports = {};
-  new Function('exports', 'window', 'Element', 'HTMLInputElement', js)(exports, window, Element, HTMLInputElement);
+  new Function('exports', 'require', 'window', 'Element', 'HTMLInputElement', 'process', js)(exports,
+    name => { assert.equal(name, './seo'); return { siteUrl: origin }; },
+    window, Element, HTMLInputElement, { env: { NODE_ENV: environment } });
   return { ...exports, calls };
 }
+
+test('local, preview and development events are blocked even when a Google tag is already present', () => {
+  const calls = [];
+  for (const testOrigin of ['http://localhost:3001', 'http://127.0.0.1:3000', 'http://[::1]:3000', 'http://192.168.1.2:3000', 'https://preview.vercel.app', `${origin}.example.com`, 'http://handsfreepdfreader.vercel.app']) {
+    const a = analytics({ location: { origin: testOrigin }, gtag: (...args) => calls.push(args) });
+    a.trackInteraction('score_play_click');
+    assert.equal(a.isAnalyticsEnabled(), false);
+  }
+  for (const env of ['development', 'test', undefined]) {
+    const a = analytics({ gtag: (...args) => calls.push(args) }, env ?? '');
+    a.trackInteraction('score_play_click');
+    assert.equal(a.isAnalyticsEnabled(), false);
+  }
+  assert.deepEqual(calls, []);
+  assert.equal(analytics().isAnalyticsEnabled(), true);
+});
+
+test('both analytics providers and DOM listeners stay unmounted outside the production origin', () => {
+  const component = ts.transpileModule(fs.readFileSync('app/interaction-analytics.tsx', 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
+  }).outputText;
+  for (const enabled of [false, true]) {
+    let state = false;
+    const effects = [], added = [], removed = [];
+    const listener = () => {};
+    const exports = {};
+    const dependencies = {
+      'react': { useState: () => [state, value => { state = value; }], useEffect: callback => effects.push(callback) },
+      'react/jsx-runtime': { jsx: (type, props) => ({ type, props }), jsxs: (type, props) => ({ type, props }), Fragment: 'fragment' },
+      'next/script': { default: 'GoogleScript', __esModule: true },
+      '@vercel/analytics/next': { Analytics: 'VercelAnalytics' },
+      '../lib/analytics': { gaMeasurementId: 'G-GSVS893CJ5', isAnalyticsEnabled: () => enabled, recordInteraction: listener },
+    };
+    new Function('exports', 'require', 'document', component)(exports, name => dependencies[name], {
+      addEventListener: (...args) => added.push(args), removeEventListener: (...args) => removed.push(args),
+    });
+    assert.equal(exports.default(), null, 'no scripts in SSR or the initial hydration render');
+    const cleanup = effects[0]();
+    const output = exports.default();
+    if (!enabled) {
+      assert.equal(output, null);
+      assert.deepEqual(added, []);
+    } else {
+      assert.deepEqual(output.props.children.map(child => child.type), ['VercelAnalytics', 'GoogleScript', 'GoogleScript']);
+      assert.deepEqual(added, [['click', listener, true], ['change', listener, true]]);
+      cleanup();
+      assert.deepEqual(removed, added);
+    }
+  }
+});
 
 test('events target the GA4 destination already linked to the supplied Google tag', () => {
   assert.equal(analytics().gaMeasurementId, 'G-GSVS893CJ5');
