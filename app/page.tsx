@@ -1063,7 +1063,7 @@ export default function Home() {
   const uploadAction = (text: string) => (
     <label className="file-label primary-upload-action">
       <strong>{text}</strong>
-      <input type="file" accept="application/pdf" onChange={onFileChange} />
+      <input data-analytics-change="reader_pdf_select" type="file" accept="application/pdf" onChange={onFileChange} />
     </label>
   );
 
@@ -1085,9 +1085,9 @@ export default function Home() {
 
   const renderZoomControls = () => (
     <div className="zoom-controls" role="group" aria-label={t("악보 확대 및 축소")}>
-      <button type="button" onClick={() => changePdfZoom(-1)} disabled={pdfZoom === PDF_ZOOM_LEVELS[0]} aria-label={t("축소")}>−</button>
+      <button data-analytics-click="reader_zoom_out_click" type="button" onClick={() => changePdfZoom(-1)} disabled={pdfZoom === PDF_ZOOM_LEVELS[0]} aria-label={t("축소")}>−</button>
       <span aria-live="polite">{Math.round(pdfZoom * 100)}%</span>
-      <button type="button" onClick={() => changePdfZoom(1)} disabled={pdfZoom === PDF_ZOOM_LEVELS.at(-1)} aria-label={t("확대")}>+</button>
+      <button data-analytics-click="reader_zoom_in_click" type="button" onClick={() => changePdfZoom(1)} disabled={pdfZoom === PDF_ZOOM_LEVELS.at(-1)} aria-label={t("확대")}>+</button>
     </div>
   );
 
@@ -1102,17 +1102,17 @@ export default function Home() {
       <header className="topbar">
         <div className="brand-block"><h1>{t("입으로 넘기는 악보")}</h1><p>{t("손은 연주에, 페이지는 입으로.")}</p></div>
         <div className="topbar-actions">
-          <Link href="/score-sync" className="score-sync-link">{t("악보 싱크")}</Link>
+          <Link data-analytics-click="reader_score_sync_click" href="/score-sync" className="score-sync-link">{t("악보 싱크")}</Link>
           <label className="language-control">
             <span className="sr-only">{t("언어")}</span>
-            <select value={language} onChange={(event) => chooseLanguage(event.target.value as "ko" | "en")}>
+            <select data-analytics-change="reader_language_change" value={language} onChange={(event) => chooseLanguage(event.target.value as "ko" | "en")}>
               <option value="ko" lang="ko">한국어</option>
               <option value="en" lang="en">English</option>
             </select>
           </label>
-          <button type="button" className="usage-guide-button" onClick={openUsageGuide} aria-haspopup="dialog">{t("사용법")}</button>
+          <button data-analytics-click="reader_guide_open_click" type="button" className="usage-guide-button" onClick={openUsageGuide} aria-haspopup="dialog">{t("사용법")}</button>
           {hasLoadedPdf ? uploadAction(t("악보 변경")) : null}
-          {hasSavedScores ? <button type="button" className="secondary-button" onClick={() => setIsLibraryOpen((prev) => !prev)} aria-expanded={isLibraryOpen} aria-controls="saved-library">{t("최근 악보")}</button> : null}
+          {hasSavedScores ? <button data-analytics-click="reader_library_toggle_click" type="button" className="secondary-button" onClick={() => setIsLibraryOpen((prev) => !prev)} aria-expanded={isLibraryOpen} aria-controls="saved-library">{t("최근 악보")}</button> : null}
         </div>
       </header>
 
@@ -1120,7 +1120,7 @@ export default function Home() {
       {cameraPermission === "denied" ? <p className="permission-help">{t("입으로 넘기려면 카메라 권한이 필요해요. 주소창의 사이트 설정에서 카메라를 허용한 뒤 ‘카메라 허용하기’를 눌러주세요.")}</p> : null}
       <section className="motion-bar" aria-label={t("입으로 페이지 넘기기")}>
         <div className="motion-bar-copy"><span className={`status-dot ${isCameraReady ? "is-ready" : ""}`} aria-hidden="true" /><strong>{t("입으로 페이지 넘기기")}</strong><span>{cameraEnabled ? t("자동으로 시작됩니다") : cameraError ? t("카메라 확인 필요") : t("잠시 멈춤")}</span></div>
-        <button type="button" className="camera-toggle" onClick={handleCameraAction} aria-pressed={cameraEnabled}>{t(cameraButtonText)}</button>
+        <button data-analytics-click="reader_camera_toggle_click" type="button" className="camera-toggle" onClick={handleCameraAction} aria-pressed={cameraEnabled}>{t(cameraButtonText)}</button>
       </section>
 
       {isLibraryOpen && hasSavedScores ? (
@@ -1128,8 +1128,8 @@ export default function Home() {
           <h2>{t("최근 악보")}</h2>
           <ul className="saved-score-list">{savedScores.map((score) => (
               <li key={score.id} className="saved-score-item">
-                <button type="button" className="saved-score-open" onClick={() => { setIsLibraryOpen(false); void openSavedScore(score); }}><strong>{score.name}</strong><span>{t("{page}페이지부터 이어보기", { page: score.currentPage })}</span></button>
-                <button type="button" className="saved-score-delete" aria-label={t("{name} 삭제", { name: score.name })} onClick={() => void deleteSavedScore(score.id)}>{t("삭제")}</button>
+                <button data-analytics-click="reader_library_select_click" type="button" className="saved-score-open" onClick={() => { setIsLibraryOpen(false); void openSavedScore(score); }}><strong>{score.name}</strong><span>{t("{page}페이지부터 이어보기", { page: score.currentPage })}</span></button>
+                <button data-analytics-click="reader_library_delete_click" type="button" className="saved-score-delete" aria-label={t("{name} 삭제", { name: score.name })} onClick={() => void deleteSavedScore(score.id)}>{t("삭제")}</button>
               </li>
             ))}</ul>
         </section>
@@ -1137,7 +1137,7 @@ export default function Home() {
 
       <section className="workspace-grid">
         <div className="viewer-card" onMouseMove={isFocusMode ? revealFocusControls : undefined} onTouchStart={isFocusMode ? revealFocusControls : undefined}>
-          {isFocusMode ? <button type="button" className="focus-close-button" onClick={toggleFocusMode} aria-label={t("전체 보기 닫기")} title={t("전체 보기 닫기 (Esc)")}><span aria-hidden="true">×</span></button> : null}
+          {isFocusMode ? <button data-analytics-click="reader_focus_close_click" type="button" className="focus-close-button" onClick={toggleFocusMode} aria-label={t("전체 보기 닫기")} title={t("전체 보기 닫기 (Esc)")}><span aria-hidden="true">×</span></button> : null}
           {isFocusMode && hasLoadedPdf ? <div className="focus-view-controls">
             {renderZoomControls()}
             <span className="focus-page-position" aria-label={t("현재 페이지 {page} / {total}", { page: currentPage, total: pageCount })}>{currentPage} / {pageCount}</span>
@@ -1149,7 +1149,7 @@ export default function Home() {
             {hasLoadedPdf ? <div className="viewer-actions">
               {renderZoomControls()}
               {headScrollStatus ? <span className={`head-scroll-hint ${headScrollDirection ? "is-active" : ""}`} role="status">{headScrollStatus}</span> : null}
-              <div className="page-buttons"><button type="button" onClick={toggleFocusMode}>{t("전체 보기")}</button></div>
+              <div className="page-buttons"><button data-analytics-click="reader_focus_open_click" type="button" onClick={toggleFocusMode}>{t("전체 보기")}</button></div>
             </div> : null}
           </div>
           <div ref={pdfViewerRef} className={`pdf-viewer ${pdfZoom > 1 ? "is-zoomed" : ""}`} onPointerDown={handlePageSwipeStart} onPointerUp={handlePageSwipeEnd} onPointerCancel={() => { touchStartRef.current = null; }}>
@@ -1160,7 +1160,7 @@ export default function Home() {
             </div> : null}
           </div>
           {!isFocusMode ? <footer className="reader-footer">
-            {hasLoadedPdf ? <nav className="page-navigation" aria-label={t("페이지 이동")}><button type="button" onClick={() => queuePage(currentPage - 1)} disabled={!canGoPrevious}>{t("← 이전")}</button><span aria-live="polite"><strong>{currentPage}</strong> / {pageCount}</span><button type="button" onClick={() => queuePage(currentPage + 1)} disabled={!canGoNext}>{t("다음 →")}</button></nav> : null}
+            {hasLoadedPdf ? <nav className="page-navigation" aria-label={t("페이지 이동")}><button data-analytics-click="reader_previous_click" type="button" onClick={() => queuePage(currentPage - 1)} disabled={!canGoPrevious}>{t("← 이전")}</button><span aria-live="polite"><strong>{currentPage}</strong> / {pageCount}</span><button data-analytics-click="reader_next_click" type="button" onClick={() => queuePage(currentPage + 1)} disabled={!canGoNext}>{t("다음 →")}</button></nav> : null}
             {detectionFeedback}
           </footer> : null}
         </div>
