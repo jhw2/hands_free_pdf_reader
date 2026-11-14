@@ -272,7 +272,7 @@ export default function Home() {
     }
 
     const data = await blob.arrayBuffer();
-    const pdf = await window.pdfjsLib.getDocument({ data }).promise;
+    const pdf = await window.pdfjsLib.getDocument({ data, cMapUrl: "/cmaps/", cMapPacked: true }).promise;
     const safeInitialPage = Math.max(1, Math.min(pdf.numPages, initialPage));
 
     setPdfDoc(pdf);

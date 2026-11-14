@@ -35,9 +35,9 @@ before(async () => {
 function canvas(width = 1190, height = 1684) {
   const data = new Uint8ClampedArray(width * height * 4).fill(255);
   return { width, height, getContext: () => ({ getImageData: () => ({ data }) }),
-    rect(left, top, right, bottom) {
+    rect(left, top, right, bottom, shade = 0) {
       for (let y = Math.round(top); y <= Math.round(bottom); y++) {
-        for (let x = Math.round(left); x <= Math.round(right); x++) data.fill(0, (y * width + x) * 4, (y * width + x) * 4 + 3);
+        for (let x = Math.round(left); x <= Math.round(right); x++) data.fill(shade, (y * width + x) * 4, (y * width + x) * 4 + 3);
       }
     },
   };
@@ -157,6 +157,52 @@ test('image-only scores retain bar detection and include the sixth TAB line', ()
     assert.equal(measures.length, 3);
     assert.ok(measures.every(measure => measure.staffBottom === 150));
   }
+});
+
+test('Flashback keeps all four opening rest measures when TAB lines render as light gray', () => {
+  const image = canvas();
+  // Broad title and watermark blocks must not hide or create a staff.
+  image.rect(350, 95, 840, 130);
+  image.rect(100, 600, 1100, 900, 205);
+  const edges = [56, 343, 606, 869, 1133];
+  for (const top of [268, 451]) {
+    for (let line = 0; line < 6; line++) image.rect(edges[0], top + line * 12.75, edges.at(-1), top + line * 12.75, [163, 199, 211, 163, 163, 210][line]);
+    for (const x of edges) image.rect(x, top, x, top + 12.75 * 5);
+    for (const x of [120, 230, 365, 480, 746, 890, 1010]) image.rect(x - 4, top + 22, x + 4, top + 25);
+  }
+  const measures = findMeasures(image, 1, []);
+  assert.equal(measures.length, 8);
+  assert.deepEqual(measures.slice(0, 4).map(measure => measure.pixelRight), edges.slice(1));
+  assert.equal(measures[0].staffTop, 268);
+  assert.equal(measures[0].staffBottom, 332);
+  assert.equal(measures[4].staffTop, 451);
+});
+
+test('short rhythm stems below six-line TAB do not split Flashback solo measures', () => {
+  const image = canvas();
+  const edges = [56, 343, 606, 869, 1133];
+  for (let line = 0; line < 6; line++) image.rect(56, 373 + line * 12.75, 1133, 373 + line * 12.75);
+  for (const x of edges) image.rect(x, 373, x, 437);
+  for (const x of [247, 277, 365, 721, 791]) {
+    image.rect(x, 373, x, 466);
+    image.rect(x, 465, x + 18, 468);
+  }
+  const measures = findMeasures(image, 3, []);
+  assert.deepEqual(measures.map(measure => measure.pixelRight), edges.slice(1));
+});
+
+test('stacked open-string zeros do not move the start of the final TAB measure', () => {
+  const image = canvas();
+  const edges = [56, 291, 501, 712, 922, 1133];
+  for (let line = 0; line < 6; line++) {
+    const y = Math.round(1436 + line * 12.75);
+    image.rect(56, y, 1133, y);
+    image.rect(942, y - 5, 948, y + 5);
+    image.rect(943, y - 3, 947, y + 3, 255);
+  }
+  for (const x of edges) image.rect(x, 1436, x, 1500);
+  const measures = findMeasures(image, 3, []);
+  assert.deepEqual(measures.map(measure => [measure.pixelLeft, measure.pixelRight]), edges.slice(1).map((right, i) => [edges[i], right]));
 });
 
 test('repeat dot edges are not counted as a connecting stem', () => {
@@ -307,6 +353,26 @@ test('recognizes repeat dots when the score contains only six-line TAB', () => {
   assert.equal(measures[0].repeatStart, true);
   assert.equal(measures[2].repeatEnd, true);
   assert.deepEqual(compilePlaybackOrder(measures), { order: [0, 1, 2, 0, 1, 2], warnings: [], valid: true });
+});
+
+test('a TAB 13 before the final double bar in Soran is not a repeat-dot pair', () => {
+  const image = canvas();
+  const geometry = { horizontal: [], vertical: [] };
+  addStaff(geometry, 532, 12.75, 6, [56, 343, 607, 865, 1133]);
+  for (const line of geometry.horizontal) image.rect(line.left, line.y, line.right, line.y);
+  for (const x of [1129, 1133]) image.rect(x, 532, x, 596);
+  const digits = [
+    '......##.......', '##..######.....', '##..##..##.....', '##.##....##....',
+    '##..#...##.....', '##.....###.....', '##....####....#', '##......###....',
+    '##.##....##....', '##.##....##....', '##.#######.....', '##..#####......',
+  ];
+  digits.forEach((row, y) => [...row].forEach((pixel, x) => {
+    if (pixel === '#') image.rect(1098 + x, 552 + y, 1098 + x, 552 + y);
+  }));
+  image.rect(1104, 564, 1105, 564);
+  const measures = findMeasures(image, 3, [], geometry);
+  assert.ok(measures.every(measure => !measure.repeatEnd && !measure.repeatStart));
+  assert.equal(compilePlaybackOrder(measures).order.length, measures.length);
 });
 
 test('takes the second ending after a wide clef and key signature on the next page', () => {

@@ -132,7 +132,7 @@ test('delayed YouTube seek samples cannot replace the selected measure during it
   assert.equal(displayedTime, 121, 'normal playback tracking resumes after the countdown');
 });
 
-function seeking({ ready = true, url = 'abcdefghijk', advancing = false, unstarted = false } = {}) {
+function seeking({ ready = true, url = 'abcdefghijk', advancing = false, unstarted = false, time = 0, offset = 0, playbackOrder = Array.from({ length: 150 }, (_, i) => i) } = {}) {
   const harness = session();
   const { env, state } = harness;
   let now = 0, position = 0, playerState = unstarted ? -1 : 2, muted = false, nextTimer = 0;
@@ -151,7 +151,7 @@ function seeking({ ready = true, url = 'abcdefghijk', advancing = false, unstart
     speakCountIn: beat => speech.push(beat), stopCountIn: () => speech.push('stop'),
     playerRef: { current: player }, playerReadyRef: { current: ready }, countdownTimerRef: { current: null },
     videoId: 'abcdefghijk', url, getVideoId: value => value,
-    bpm: 120, beatsPerMeasure: 4, time: 0, offset: 0, playbackOrder: Array.from({ length: 150 }, (_, i) => i),
+    bpm: 120, beatsPerMeasure: 4, time, offset, playbackOrder,
     lastProgressRef: { current: { time: 0, changedAt: 0 } }, performance: { now: () => now },
     window: { setInterval: fn => { timers.set(++nextTimer, fn); return nextTimer; }, clearInterval: id => timers.delete(id), setTimeout: () => {} },
   });
@@ -167,6 +167,17 @@ function seeking({ ready = true, url = 'abcdefghijk', advancing = false, unstart
       for (const fn of [...timers.values()]) fn();
     } };
 }
+
+test('clicking the first measure restarts at the offset even when a later repeat contains it', () => {
+  for (const offset of [0, 2.5]) {
+    const h = seeking({ time: 40, offset, playbackOrder: [...Array.from({ length: 66 }, (_, i) => i), 0, 1, 2] });
+    h.select(0);
+    assert.equal(h.state.Time, offset);
+    assert.equal(h.env.lastSelectedTargetRef.current, offset);
+    assert.deepEqual(h.commands.find(command => Array.isArray(command) && command[0] === 'load'),
+      ['load', { videoId: 'abcdefghijk', startSeconds: Math.max(0, offset - .5) }]);
+  }
+});
 
 test('count-in speaks one two three four once per second and stops before playback or on cancellation', () => {
   const h = seeking();

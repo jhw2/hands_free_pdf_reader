@@ -9,6 +9,7 @@ import YoutubeSearch from "./youtube-search";
 import NavigationEditor from "./navigation-editor";
 import { buildNavigationMeasures, navigationEditsMatch, validateNavigationMarkers, type NavigationEdits } from "./navigation-edits";
 import { readLibrary, saveSong, activateSong, deleteSong, type SavedSong } from "./library";
+import { detectTempo, detectImageTempo, resolveTempo } from "./tempo";
 
 type ScoreTextItem = { text: string; x: number; y: number; width: number; height: number; fontName: string; fontFamily?: string };
 type MeasureBox = NavigationMeasure & {
@@ -85,14 +86,6 @@ const shouldRetryYoutubeError = (code: number, attempts: number, playbackPending
 
 const formatTime = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, "0")}`;
 
-const detectTempo = (text: string) => {
-  const normalized = text.replace(/\s+/g, " ");
-  const match = normalized.match(/\bBPM\s*[:=]?\s*(\d{2,3})\b/i) ?? normalized.match(/[=＝]\s*(\d{2,3})\b/);
-  if (!match) return null;
-  const value = Number(match[1]);
-  return value >= 30 && value <= 300 ? value : null;
-};
-
 const detectBeatsPerMeasure = (text: string) => {
   // shortcut: only labeled quarter-note meters are safe until the BPM beat unit is recognized.
   const match = text.replace(/\s+/g, " ").match(/(?:time\s*signature|meter|박자)\s*[:=]?\s*([2-9])\s*\/\s*4/i);
@@ -111,7 +104,7 @@ const readPdfTextItems = async (page: PDFPageProxy) => {
   } finally { reader.releaseLock(); }
 };
 
-type StoredMetadata = Partial<Pick<SavedSong, "youtubeUrl" | "fileName" | "bpm" | "beatsPerMeasure" | "offset" | "navigationEdits">>;
+type StoredMetadata = Partial<Pick<SavedSong, "youtubeUrl" | "fileName" | "bpm" | "bpmSource" | "beatsPerMeasure" | "offset" | "navigationEdits">>;
 
 const parseNavigationText = (value: string, fontFamily = "") => {
   const text = value.normalize("NFKC").replace(/\s+/g, " ").trim();
@@ -256,13 +249,24 @@ function findMeasures(canvas: HTMLCanvasElement, page: number, textItems: ScoreT
     const i = (Math.round(y) * width + Math.round(x)) * 4;
     return data[i] + data[i + 1] + data[i + 2] < 590;
   };
+  const isStaffInk = (x: number, y: number) => {
+    if (isDark(x, y)) return true;
+    const i = (Math.round(y) * width + Math.round(x)) * 4;
+    const shade = data[i] + data[i + 1] + data[i + 2];
+    const above = i - width * 8, below = i + width * 8;
+    // Thin antialiased lines can be gray; flat watermark regions are not line evidence.
+    return shade < 660 && shade + 24 < Math.min(
+      data[above] + data[above + 1] + data[above + 2],
+      data[below] + data[below + 1] + data[below + 2],
+    );
+  };
 
   // A real staff has five lines, or six for guitar TAB.
   // This deliberately excludes titles, lyrics and other dense text regions.
   const rowCandidates: number[] = [];
   for (let y = Math.floor(height * .04); y < height * .97; y++) {
     let dark = 0;
-    for (let x = Math.floor(width * .06); x < width * .94; x += 2) if (isDark(x, y)) dark++;
+    for (let x = Math.floor(width * .06); x < width * .94; x += 2) if (isStaffInk(x, y)) dark++;
     if (dark > width * .25) rowCandidates.push(y);
   }
   const staffLines: number[] = [];
@@ -307,7 +311,7 @@ function findMeasures(canvas: HTMLCanvasElement, page: number, textItems: ScoreT
       let best: [number, number] = [staffLeft, staffRight];
       let bestLength = 0;
       for (let x = Math.floor(width * .03); x <= width * .97; x++) {
-        const dark = isDark(x, y - 1) || isDark(x, y) || isDark(x, y + 1);
+        const dark = isStaffInk(x, y - 1) || isStaffInk(x, y) || isStaffInk(x, y + 1);
         if (!dark) continue;
         if (runStart < 0 || x - lastDark > allowedGap) runStart = x;
         lastDark = x;
@@ -348,9 +352,11 @@ function findMeasures(canvas: HTMLCanvasElement, page: number, textItems: ScoreT
       if (totalCoverage >= .78 && gapCoverages.every((coverage) => coverage >= .62)) candidates.push(x);
     }
     const isAttachedNoteStem = (bar: number) => {
+      // TAB rhythm stems can end within two spaces below the sixth line.
+      const [nearTail, farTailEnd] = lines.length === 6 ? [.5, 1.75] : [1.55, 3.2];
       const farTail = (direction: -1 | 1) => {
-        const start = Math.round((direction < 0 ? coreTop : coreBottom) + direction * spacing * 1.55);
-        const end = Math.round((direction < 0 ? coreTop : coreBottom) + direction * spacing * 3.2);
+        const start = Math.round((direction < 0 ? coreTop : coreBottom) + direction * spacing * nearTail);
+        const end = Math.round((direction < 0 ? coreTop : coreBottom) + direction * spacing * farTailEnd);
         const rows: boolean[] = [];
         for (let y = start; direction < 0 ? y >= end : y <= end; y += direction) {
           if (y < 0 || y >= height) continue;
@@ -362,7 +368,7 @@ function findMeasures(canvas: HTMLCanvasElement, page: number, textItems: ScoreT
       let attachedRows = 0;
       const top = Math.max(0, Math.round(coreTop - spacing * 2));
       const bottom = Math.min(height - 1, Math.round(coreBottom + spacing * 2));
-      const attachmentWidth = Math.max(5, spacing * .55);
+      const attachmentWidth = Math.max(5, spacing * (lines.length === 6 ? .5 : .55));
       const attachmentLimit = Math.max(4, Math.round(spacing * .55));
       for (let y = top; y <= bottom; y++) {
         // Staff lines themselves are horizontal attachments for every vertical line.
@@ -489,12 +495,18 @@ function findMeasures(canvas: HTMLCanvasElement, page: number, textItems: ScoreT
             const densities = shiftedTargets.map((centerY) => {
               let dark = 0;
               let total = 0;
+              let inkY = 0;
               for (let py = Math.round(centerY) - radius; py <= Math.round(centerY) + radius; py++) {
                 const onStaffLine = staff.lines.some((line) => Math.abs(py - line) <= Math.max(1, staff.spacing * .16));
                 if (onStaffLine) continue;
                 touchesSide ||= isDark(x - radius - 1, py) || isDark(x + radius + 1, py);
-                for (let px = x - radius; px <= x + radius; px++) { total++; if (isDark(px, py)) dark++; }
+                for (let px = x - radius; px <= x + radius; px++) {
+                  total++;
+                  if (isDark(px, py)) { dark++; inkY += py; }
+                }
               }
+              // TAB digits leave two lobes at the sample edges, away from the dot centers.
+              if (!dark || Math.abs(inkY / dark - centerY) > Math.max(1, radius * .35)) return 0;
               return dark / Math.max(1, total);
             });
             // A dot must fit inside the sample; clipped edges of rests can resemble two separate dots.
@@ -983,8 +995,9 @@ export default function ScoreSyncPage() {
     try {
       const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
       pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
-      const pdf = await pdfjs.getDocument({ data: await blob.arrayBuffer() }).promise;
+      const pdf = await pdfjs.getDocument({ data: await blob.arrayBuffer(), cMapUrl: "/cmaps/", cMapPacked: true }).promise;
       const nextPages: string[] = []; const nextMeasures: MeasureBox[] = []; const scoreText: string[] = [];
+      let tempoHeader: HTMLCanvasElement | undefined;
       for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
         const page = await pdf.getPage(pageNumber);
         const textItems = await readPdfTextItems(page);
@@ -1011,16 +1024,27 @@ export default function ScoreSyncPage() {
         const context = canvas.getContext("2d"); if (!context) continue;
         const geometry = readScoreGeometry(operators, viewport.transform, pdfjs);
         await page.render({ canvas, canvasContext: context, viewport }).promise;
-        nextMeasures.push(...findMeasures(canvas, pageNumber, pageTextItems, geometry));
+        const pageMeasures = findMeasures(canvas, pageNumber, pageTextItems, geometry);
+        nextMeasures.push(...pageMeasures);
+        if (pageNumber === 1 && pageMeasures[0] && !detectTempo(scoreText.join(" "))) {
+          const first = pageMeasures[0];
+          const bottom = Math.min(canvas.height, Math.ceil(first.staffTop));
+          const top = Math.max(0, Math.floor(bottom - Math.max(100, first.spacing * 14)));
+          tempoHeader = document.createElement("canvas");
+          tempoHeader.width = canvas.width * 2; tempoHeader.height = (bottom - top) * 2;
+          tempoHeader.getContext("2d")?.drawImage(canvas, 0, top, canvas.width, bottom - top, 0, 0, tempoHeader.width, tempoHeader.height);
+        }
         nextPages.push(canvas.toDataURL("image/jpeg", .9));
       }
       if (loadVersion !== pdfLoadVersionRef.current) return;
       applyRepeatCountHints(nextMeasures);
       applyVoltaPasses(nextMeasures);
-      const detectedBpm = detectTempo(scoreText.join(" "));
+      const detectedBpm = detectTempo(scoreText.join(" ")) ?? (tempoHeader ? await detectImageTempo(tempoHeader) : null);
+      if (loadVersion !== pdfLoadVersionRef.current) return;
       const detectedBeats = detectBeatsPerMeasure(scoreText.join(" "));
-      setBpm(savedSong?.bpm ?? detectedBpm ?? 120);
-      setTempoDetected(!savedSong && !!detectedBpm);
+      const tempo = resolveTempo(savedSong, detectedBpm);
+      setBpm(tempo.bpm);
+      setTempoDetected(tempo.bpmSource === "detected");
       setBeatsPerMeasure(savedSong?.beatsPerMeasure ?? detectedBeats);
       setOffset(savedSong?.offset ?? 0);
       setPages(nextPages); setMeasures(nextMeasures); setNavigationEdits(savedSong?.navigationEdits ?? null);
@@ -1028,12 +1052,13 @@ export default function ScoreSyncPage() {
       if (shouldPersist) {
         currentSongRef.current = {
           id: crypto.randomUUID(), fileName: nextFileName, blob,
-          youtubeUrl: "", bpm: detectedBpm ?? 120, beatsPerMeasure: detectedBeats,
+          youtubeUrl: "", ...tempo, beatsPerMeasure: detectedBeats,
           offset: 0, updatedAt: Date.now(),
         };
         storeMetadata({});
       }
       if (savedSong) {
+        if (savedSong.bpm !== tempo.bpm || savedSong.bpmSource !== tempo.bpmSource) storeMetadata(tempo);
         setUrl(savedSong.youtubeUrl);
         setVideoId(getVideoId(savedSong.youtubeUrl));
         setPlayerGeneration(generation => generation + 1);
@@ -1133,7 +1158,7 @@ export default function ScoreSyncPage() {
     const secondsPerMeasure = (60 / Math.max(1, bpm)) * beatsPerMeasure;
     const currentStep = Math.max(0, Math.floor(Math.max(0, time - offset) / secondsPerMeasure));
     const nextOccurrence = playbackOrder.findIndex((measure, step) => step >= currentStep && measure === index);
-    const targetStep = nextOccurrence >= 0 ? nextOccurrence : Math.max(0, playbackOrder.indexOf(index));
+    const targetStep = index === 0 ? 0 : nextOccurrence >= 0 ? nextOccurrence : Math.max(0, playbackOrder.indexOf(index));
     const target = offset + targetStep * secondsPerMeasure;
     const leadIn = Math.min(.5, target);
     const seekTarget = target - leadIn;
@@ -1257,7 +1282,7 @@ export default function ScoreSyncPage() {
     const next = Math.max(30, Math.min(300, value || 30));
     setBpm(next);
     setTempoDetected(false);
-    try { storeMetadata({ bpm: next }); } catch { /* Playback can continue without persistence. */ }
+    try { storeMetadata({ bpm: next, bpmSource: "manual" }); } catch { /* Playback can continue without persistence. */ }
   };
 
   const updateBeatsPerMeasure = (value: number) => {
@@ -1312,7 +1337,7 @@ export default function ScoreSyncPage() {
           <div className={styles.setupGrid}>
             <div className={styles.connection}><YoutubeSearch value={url} disabled={!pages.length || loading || restoring || deleting} isLink={!!getVideoId(url)} onChange={updateYoutubeUrl} onConnect={attachYoutube}/>
               {readyToPlay && <p className={styles.readyHint}>● 연결됐어요. 재생 버튼을 누르거나 악보의 마디를 눌러보세요.</p>}
-              <details className={styles.syncSettings}><summary>싱크 조절 <span>BPM · 박자 · 시작 시간</span></summary><fieldset disabled={!pages.length || loading || restoring || deleting}>
+              <details className={styles.syncSettings} open><summary>싱크 조절 <span>BPM · 박자 · 시작 시간</span></summary><fieldset disabled={!pages.length || loading || restoring || deleting}>
                 <div className={styles.settingsRow}><label>{tempoDetected ? "감지한 BPM" : "BPM"}<input type="number" min="30" max="300" value={bpm} onChange={event => updateBpm(Number(event.target.value))}/></label><label>한 마디 박자<select value={beatsPerMeasure} onChange={event => updateBeatsPerMeasure(Number(event.target.value))}>{[2,3,4,5,6,7,8,9,10,11,12].map(beats => <option key={beats} value={beats}>{beats}박</option>)}</select></label>
                 <label>첫 마디 시작 (초)<input aria-label="악보 첫 마디 시작 시간 (초)" type="number" inputMode="decimal" min="0" step="0.1" value={offset} onFocus={event => event.currentTarget.select()} onChange={event => { const value = Number(event.target.value); if (!Number.isFinite(value) || value < 0) return; setOffset(value); storeMetadata({ offset: value }); }}/></label></div>
                 <p>음원과 악보가 어긋날 때만 조절하세요. 설정은 이 곡에 자동 저장됩니다.</p>

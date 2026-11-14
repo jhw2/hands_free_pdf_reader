@@ -21,5 +21,20 @@ test('PDF readers use the browser-compatible legacy build', () => {
   for (const source of ['../app/page.tsx', '../app/score-sync/page.tsx']) {
     const contents = fs.readFileSync(require.resolve(source), 'utf8');
     assert.match(contents, /import\("pdfjs-dist\/legacy\/build\/pdf\.mjs"\)/);
+    assert.match(contents, /cMapUrl: "\/cmaps\/", cMapPacked: true/);
+  }
+});
+
+test('PDF CMaps and browser OCR assets are supplied by the build', () => {
+  const assets = {
+    'cmaps/Adobe-Korea1-UCS2.bcmap': 'pdfjs-dist/cmaps/Adobe-Korea1-UCS2.bcmap',
+    'ocr/worker.min.js': 'tesseract.js/dist/worker.min.js',
+    'ocr/eng.traineddata.gz': '@tesseract.js-data/eng/4.0.0_best_int/eng.traineddata.gz',
+  };
+  for (const variant of ['lstm', 'simd-lstm', 'relaxedsimd-lstm']) {
+    for (const suffix of ['wasm', 'wasm.js']) assets[`ocr/tesseract-core-${variant}.${suffix}`] = `tesseract.js-core/tesseract-core-${variant}.${suffix}`;
+  }
+  for (const [asset, installed] of Object.entries(assets)) {
+    assert.ok(fs.readFileSync(require.resolve(`../public/${asset}`)).equals(fs.readFileSync(require.resolve(installed))), asset);
   }
 });

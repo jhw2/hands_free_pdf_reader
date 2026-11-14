@@ -6,6 +6,7 @@ export type SavedSong = {
   blob: Blob;
   youtubeUrl: string;
   bpm: number;
+  bpmSource?: "detected" | "manual" | "default";
   beatsPerMeasure: number;
   offset: number;
   navigationEdits?: NavigationEdits | null;
