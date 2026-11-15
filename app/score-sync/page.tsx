@@ -262,6 +262,15 @@ function findMeasures(canvas: HTMLCanvasElement, page: number, textItems: ScoreT
       data[below] + data[below + 1] + data[below + 2],
     );
   };
+  const hasContinuousStroke = (x: number, top: number, bottom: number) => {
+    let covered = 0, missingRun = 0, longestGap = 0;
+    for (let y = top; y <= bottom; y++) {
+      if (isDark(x - 1, y) || isDark(x, y) || isDark(x + 1, y)) { covered++; missingRun = 0; }
+      else { missingRun++; longestGap = Math.max(longestGap, missingRun); }
+    }
+    // Permit one pixel of raster rounding, not a visibly interrupted stroke.
+    return covered / (bottom - top + 1) >= .95 && longestGap <= 1;
+  };
 
   // A real staff has five lines, or six for guitar TAB.
   // This deliberately excludes titles, lyrics and other dense text regions.
@@ -332,9 +341,65 @@ function findMeasures(canvas: HTMLCanvasElement, page: number, textItems: ScoreT
     const vectorStaff = vectorStaves.find(staff => Math.abs(staff.lines[0] - coreTop) <= 2
       && Math.abs(staff.lines.at(-1)! - coreBottom) <= 2);
     const vectorBars = geometry && vectorStaff ? vectorBarsForStaff(geometry, vectorStaff, vectorStaves) : null;
+    const isAttachedNoteStem = (bar: number, noteheadOnly = false) => {
+      if (noteheadOnly && lines.length !== 5) return false;
+      // TAB rhythm stems can end within two spaces below the sixth line.
+      const [nearTail, farTailEnd] = lines.length === 6 ? [.5, 1.75] : [1.55, 3.2];
+      const farTail = (direction: -1 | 1) => {
+        const start = Math.round((direction < 0 ? coreTop : coreBottom) + direction * spacing * nearTail);
+        const end = Math.round((direction < 0 ? coreTop : coreBottom) + direction * spacing * farTailEnd);
+        const rows: boolean[] = [];
+        for (let y = start; direction < 0 ? y >= end : y <= end; y += direction) {
+          if (y < 0 || y >= height) continue;
+          rows.push([-2, -1, 0, 1, 2].some((dx) => isDark(bar + dx, y)));
+        }
+        return hasDenseInk(rows);
+      };
+      if (!noteheadOnly && (farTail(-1) || farTail(1))) return true;
+      let attachedRows = 0;
+      let attachedTop = Infinity, attachedBottom = -Infinity;
+      let attachedRun = 0, longestAttachment = 0;
+      const top = Math.max(0, Math.round(coreTop - spacing * 2));
+      const bottom = Math.min(height - 1, Math.round(coreBottom + spacing * 2));
+      const attachmentWidth = Math.max(5, spacing * (lines.length === 6 ? .5 : .55));
+      // Center-first sampling sees only the part of a tapered head touching the stem.
+      const attachmentLimit = Math.max(noteheadOnly ? 3 : 4, Math.round(spacing * (noteheadOnly ? .4 : .55)));
+      for (let y = top; y <= bottom; y++) {
+        // Keep TAB numeral clearance; notation noteheads can sit close to staff lines.
+        if (lines.some((line) => Math.abs(y - line) <= Math.max(2, spacing * .22))
+          && (lines.length === 6 || (isStaffInk(Math.max(staffLeft, bar - spacing * 2), y)
+          && isStaffInk(Math.min(staffRight, bar + spacing * 2), y)))) continue;
+        let seed: number | null = null;
+        for (const dx of noteheadOnly ? [0, -1, 1, -2, 2] : [-2, -1, 0, 1, 2]) {
+          if (isDark(bar + dx, y)) { seed = bar + dx; break; }
+        }
+        if (seed === null) continue;
+        let inkLeft = seed;
+        let inkRight = seed;
+        while (inkLeft > bar - spacing * 1.5 && isDark(inkLeft - 1, y)) inkLeft--;
+        while (inkRight < bar + spacing * 1.5 && isDark(inkRight + 1, y)) inkRight++;
+        if (inkRight - inkLeft + 1 > attachmentWidth) {
+          attachedRows++;
+          // A notehead sits on one side of its stem; a crossing slur extends both ways.
+          const oneSided = Math.min(bar - inkLeft, inkRight - bar) <= 1;
+          attachedRun = oneSided ? (y === attachedBottom + 1 ? attachedRun + 1 : 1) : 0;
+          longestAttachment = Math.max(longestAttachment, attachedRun);
+          attachedTop = Math.min(attachedTop, y); attachedBottom = y;
+        }
+        // A notehead or beam stays attached for several rows; an isolated barline does not.
+        if (!noteheadOnly && attachedRows >= attachmentLimit) return true;
+      }
+      // Vector endpoints are strong evidence; only a localized notehead overrides them.
+      return noteheadOnly && longestAttachment >= attachmentLimit && attachedBottom - attachedTop <= spacing * 1.5
+        && ((attachedTop >= coreBottom - spacing && attachedTop <= coreBottom)
+          || (attachedBottom <= coreTop + spacing && attachedBottom >= coreTop));
+    };
     if (vectorBars && vectorStaff) {
       const bars = clusterBarColumns(vectorBars.filter(x => x > vectorStaff.left + spacing * 5
-        && x < vectorStaff.right - spacing), Math.max(5, spacing));
+        && x < vectorStaff.right - spacing && (geometry?.vertical.some(line => line.x === x
+          && line.top <= coreTop + 1 && line.bottom >= coreBottom - 1
+          && (line.top < coreTop - spacing || line.bottom > coreBottom + spacing))
+          || !isAttachedNoteStem(x, true))), Math.max(5, spacing));
       return { lines, coreTop, coreBottom, spacing, left: vectorStaff.left, right: vectorStaff.right, bars, rejectedBars: [] };
     }
 
@@ -349,58 +414,8 @@ function findMeasures(canvas: HTMLCanvasElement, page: number, textItems: ScoreT
     const candidates: number[] = [];
     const barSearchStart = staffLeft + spacing * 5;
     for (let x = Math.ceil(barSearchStart); x <= staffRight - spacing; x++) {
-      const gapCoverages = lines.slice(0, -1).map((line, lineIndex) => {
-        const gapPadding = Math.max(1, Math.round(spacing * .14));
-        const startY = Math.ceil(line + gapPadding);
-        const endY = Math.floor(lines[lineIndex + 1] - gapPadding);
-        let covered = 0;
-        for (let y = startY; y <= endY; y++) {
-          if (isDark(x - 1, y) || isDark(x, y) || isDark(x + 1, y)) covered++;
-        }
-        return covered / Math.max(1, endY - startY + 1);
-      });
-      const totalCoverage = gapCoverages.reduce((sum, coverage) => sum + coverage, 0) / gapCoverages.length;
-      if (totalCoverage >= .78 && gapCoverages.every((coverage) => coverage >= .62)) candidates.push(x);
+      if (hasContinuousStroke(x, coreTop, coreBottom)) candidates.push(x);
     }
-    const isAttachedNoteStem = (bar: number) => {
-      // TAB rhythm stems can end within two spaces below the sixth line.
-      const [nearTail, farTailEnd] = lines.length === 6 ? [.5, 1.75] : [1.55, 3.2];
-      const farTail = (direction: -1 | 1) => {
-        const start = Math.round((direction < 0 ? coreTop : coreBottom) + direction * spacing * nearTail);
-        const end = Math.round((direction < 0 ? coreTop : coreBottom) + direction * spacing * farTailEnd);
-        const rows: boolean[] = [];
-        for (let y = start; direction < 0 ? y >= end : y <= end; y += direction) {
-          if (y < 0 || y >= height) continue;
-          rows.push([-2, -1, 0, 1, 2].some((dx) => isDark(bar + dx, y)));
-        }
-        return hasDenseInk(rows);
-      };
-      if (farTail(-1) || farTail(1)) return true;
-      let attachedRows = 0;
-      const top = Math.max(0, Math.round(coreTop - spacing * 2));
-      const bottom = Math.min(height - 1, Math.round(coreBottom + spacing * 2));
-      const attachmentWidth = Math.max(5, spacing * (lines.length === 6 ? .5 : .55));
-      const attachmentLimit = Math.max(4, Math.round(spacing * .55));
-      for (let y = top; y <= bottom; y++) {
-        // Keep TAB numeral clearance; notation noteheads can sit close to staff lines.
-        if (lines.some((line) => Math.abs(y - line) <= Math.max(2, spacing * .22))
-          && (lines.length === 6 || (isStaffInk(Math.max(staffLeft, bar - spacing * 2), y)
-          && isStaffInk(Math.min(staffRight, bar + spacing * 2), y)))) continue;
-        let seed: number | null = null;
-        for (let dx = -2; dx <= 2; dx++) {
-          if (isDark(bar + dx, y)) { seed = bar + dx; break; }
-        }
-        if (seed === null) continue;
-        let inkLeft = seed;
-        let inkRight = seed;
-        while (inkLeft > bar - spacing * 1.5 && isDark(inkLeft - 1, y)) inkLeft--;
-        while (inkRight < bar + spacing * 1.5 && isDark(inkRight + 1, y)) inkRight++;
-        if (inkRight - inkLeft + 1 > attachmentWidth) attachedRows++;
-        // A notehead or beam stays attached for several rows; an isolated barline does not.
-        if (attachedRows >= attachmentLimit) return true;
-      }
-      return false;
-    };
     // Classify each physical stroke before coalescing nearby strokes into a thick
     // or double barline. Coalescing first can move the sample point onto a nearby
     // note stem, either inventing a boundary or discarding the real barline.
@@ -408,7 +423,8 @@ function findMeasures(canvas: HTMLCanvasElement, page: number, textItems: ScoreT
     const internalStrokes = strokes.filter((x) => x > barSearchStart && x < staffRight - spacing);
     const cleanStrokes = internalStrokes.filter((x) => !isAttachedNoteStem(x));
     const internalBars = clusterBarColumns(cleanStrokes, Math.max(5, spacing * .65));
-    const rejectedBars = internalStrokes.filter((x) => !cleanStrokes.includes(x));
+    // A clear notehead cannot become a bar merely by aligning with another system.
+    const rejectedBars = internalStrokes.filter((x) => !cleanStrokes.includes(x) && !isAttachedNoteStem(x, true));
     return { lines, coreTop, coreBottom, spacing, left: staffLeft, right: staffRight, bars: internalBars, rejectedBars };
   });
 

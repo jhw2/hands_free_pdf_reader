@@ -143,7 +143,9 @@ test('accepts a bar spanning all connected staves while retaining separate syste
   addStaff(geometry, 220, 10, 6, [72, 1142]);
   addStaff(geometry, 400, 10, 5, [72, 400, 1142]);
   geometry.vertical.push(...[72, 400, 1142].map(x => ({ x, top: 100, bottom: 270 })));
-  const measures = findMeasures(canvas(), 1, [], geometry);
+  const image = canvas();
+  image.rect(391, 134, 400, 139); // A nearby note cannot erase a line crossing both staves.
+  const measures = findMeasures(image, 1, [], geometry);
   assert.deepEqual(measures.map(measure => [measure.system, measure.pixelRight, measure.staffBottom]),
     [[0, 400, 270], [0, 1142, 270], [1, 400, 440], [1, 1142, 440]]);
 });
@@ -173,6 +175,56 @@ test('kick stems ending inside a narrow drum staff do not split a four-beat meas
   }
   const measures = findMeasures(image, 1, []);
   assert.deepEqual(measures.map(m => [m.pixelLeft, m.pixelRight]), edges.slice(1).map((right, i) => [edges[i], right]));
+
+  // Other systems can legitimately put a bar at the same x as this kick stem.
+  for (const top of [100, 250]) {
+    for (let line = 0; line < 5; line++) image.rect(88, top + line * 8, 1111, top + line * 8);
+    for (const x of [88, 237, 607, 859, 1111]) image.rect(x, top, x, top + 32);
+  }
+  assert.deepEqual(findMeasures(image, 1, []).filter(m => m.staffTop === 395).map(m => [m.pixelLeft, m.pixelRight]),
+    edges.slice(1).map((right, i) => [edges[i], right]));
+  image.rect(237, 395, 237, 427);
+  assert.deepEqual(findMeasures(image, 1, []).filter(m => m.staffTop === 395).map(m => [m.pixelLeft, m.pixelRight]),
+    edges.slice(1).map((right, i) => [edges[i], right]));
+});
+
+test('a vector stem spanning the staff still needs notehead rejection', () => {
+  const image = canvas(1200, 1553);
+  const geometry = { horizontal: [], vertical: [] };
+  const edges = [88, 355, 607, 859, 1111];
+  const lines = addStaff(geometry, 395, 8, 5, edges);
+  for (const y of lines) image.rect(88, y, 1111, y);
+  for (const x of [...edges, 237, 500]) image.rect(x, 395, x, 427);
+  image.rect(228, 421, 237, 426);
+  image.rect(500, 421, 509, 426);
+  image.rect(344, 421, 353, 426); // A one-pixel gap separates this note from the real bar at 355.
+  image.rect(600, 380, 617, 385); // Slurs above a bar are not attached noteheads.
+  image.rect(850, 392, 868, 394); // A slur can touch the top line without entering the staff.
+  geometry.vertical.push(...[237, 500].map(x => ({ x, top: 395, bottom: 427 })));
+  assert.deepEqual(findMeasures(image, 1, [], geometry).map(m => [m.pixelLeft, m.pixelRight]),
+    edges.slice(1).map((right, i) => [edges[i], right]));
+});
+
+test('a slur crossing both sides of a vector bar does not erase the bar', () => {
+  const image = canvas(1200, 1553);
+  const geometry = { horizontal: [], vertical: [] };
+  const edges = [88, 355, 607, 859, 1111];
+  for (const y of addStaff(geometry, 395, 8, 5, edges)) image.rect(88, y, 1111, y);
+  for (const x of edges) image.rect(x, 395, x, 427);
+  image.rect(348, 420, 362, 423);
+  assert.deepEqual(findMeasures(image, 1, [], geometry).map(m => [m.pixelLeft, m.pixelRight]),
+    edges.slice(1).map((right, i) => [edges[i], right]));
+});
+
+test('requires a continuous staff-height stroke while allowing one raster pixel gap', () => {
+  const image = canvas(1200, 1553);
+  const edges = [88, 355, 607, 859, 1111];
+  for (let line = 0; line < 5; line++) image.rect(88, 395 + line * 8, 1111, 395 + line * 8);
+  for (const x of [...edges, 237]) image.rect(x, 395, x, 427);
+  image.rect(237, 405, 237, 406, 255);
+  image.rect(607, 405, 607, 405, 255);
+  assert.deepEqual(findMeasures(image, 1, []).map(m => [m.pixelLeft, m.pixelRight]),
+    edges.slice(1).map((right, i) => [edges[i], right]));
 });
 
 test('detects a short two-measure system without treating short text rows as a staff', () => {
