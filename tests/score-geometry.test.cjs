@@ -159,6 +159,32 @@ test('image-only scores retain bar detection and include the sixth TAB line', ()
   }
 });
 
+test('kick stems ending inside a narrow drum staff do not split a four-beat measure', () => {
+  const image = canvas(1200, 1553);
+  const edges = [88, 355, 607, 859, 1111];
+  for (const y of [395, 403, 411, 419, 427]) image.rect(edges[0], y, edges.at(-1), y);
+  for (const x of edges) image.rect(x, 395, x, 427);
+  const head = ['......#####', '...########', '.##########', '##########.', '#########..', '.#######...', '...###.....'];
+  for (const x of [111, 174, 237, 300, 378, 437, 496, 555, 630, 689, 748, 807, 882, 941, 1000, 1059]) {
+    image.rect(x, 395, x, 423);
+    head.forEach((row, y) => [...row].forEach((pixel, dx) => {
+      if (pixel === '#') image.rect(x - 10 + dx, 420 + y, x - 10 + dx, 420 + y);
+    }));
+  }
+  const measures = findMeasures(image, 1, []);
+  assert.deepEqual(measures.map(m => [m.pixelLeft, m.pixelRight]), edges.slice(1).map((right, i) => [edges[i], right]));
+});
+
+test('detects a short two-measure system without treating short text rows as a staff', () => {
+  const image = canvas(1200, 1553);
+  for (const top of [100, 1320]) {
+    for (let line = 0; line < 5; line++) image.rect(88, top + line * 8, 608, top + line * 8);
+  }
+  for (const x of [88, 355, 608]) image.rect(x, 1320, x, 1352);
+  const measures = findMeasures(image, 1, []);
+  assert.deepEqual(measures.map(m => [m.pixelLeft, m.pixelRight, m.staffTop]), [[88, 355, 1320], [355, 608, 1320]]);
+});
+
 test('Flashback keeps all four opening rest measures when TAB lines render as light gray', () => {
   const image = canvas();
   // Broad title and watermark blocks must not hide or create a staff.

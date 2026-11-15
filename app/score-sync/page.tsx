@@ -265,11 +265,12 @@ function findMeasures(canvas: HTMLCanvasElement, page: number, textItems: ScoreT
 
   // A real staff has five lines, or six for guitar TAB.
   // This deliberately excludes titles, lyrics and other dense text regions.
+  const minimumStaffWidth = width * .35;
   const rowCandidates: number[] = [];
   for (let y = Math.floor(height * .04); y < height * .97; y++) {
     let dark = 0;
     for (let x = Math.floor(width * .06); x < width * .94; x += 2) if (isStaffInk(x, y)) dark++;
-    if (dark > width * .25) rowCandidates.push(y);
+    if (dark * 2 > minimumStaffWidth) rowCandidates.push(y);
   }
   const staffLines: number[] = [];
   rowCandidates.forEach((y) => {
@@ -300,7 +301,7 @@ function findMeasures(canvas: HTMLCanvasElement, page: number, textItems: ScoreT
     Math.abs(vector.lines[0] - staff.lines[0]) <= Math.max(2, vector.spacing * .3)))].sort((a, b) => a.lines[0] - b.lines[0]);
 
   type DetectedStaff = { lines: number[]; coreTop: number; coreBottom: number; spacing: number; left: number; right: number; bars: number[]; rejectedBars: number[] };
-  const detectedStaves: DetectedStaff[] = allStaves.map(({ lines, spacing }) => {
+  const detectedStaves = allStaves.flatMap<DetectedStaff>(({ lines, spacing }) => {
     const coreTop = Math.max(0, Math.round(lines[0]));
     const coreBottom = Math.min(height - 1, Math.round(lines.at(-1)!));
     let staffLeft = width * .06;
@@ -320,7 +321,7 @@ function findMeasures(canvas: HTMLCanvasElement, page: number, textItems: ScoreT
         if (lastDark - runStart > bestLength) { best = [runStart, lastDark]; bestLength = lastDark - runStart; }
       }
       return best;
-    }).filter(([left, right]) => right - left > width * .45);
+    }).filter(([left, right]) => right - left > minimumStaffWidth);
     if (lineSpans.length) {
       const lefts = lineSpans.map(([left]) => left).sort((a, b) => a - b);
       const rights = lineSpans.map(([, right]) => right).sort((a, b) => a - b);
@@ -336,6 +337,14 @@ function findMeasures(canvas: HTMLCanvasElement, page: number, textItems: ScoreT
         && x < vectorStaff.right - spacing), Math.max(5, spacing));
       return { lines, coreTop, coreBottom, spacing, left: vectorStaff.left, right: vectorStaff.right, bars, rejectedBars: [] };
     }
+
+    if (!lineSpans.length && !vectorStaff) return [];
+    // Short systems need both end bars so dense text cannot become an extra staff.
+    if (staffRight - staffLeft < width * .5 && ![staffLeft, staffRight].every(x => {
+      let covered = 0;
+      for (let y = coreTop; y <= coreBottom; y++) if (isDark(x - 1, y) || isDark(x, y) || isDark(x + 1, y)) covered++;
+      return covered / (coreBottom - coreTop + 1) >= .8;
+    })) return [];
 
     const candidates: number[] = [];
     const barSearchStart = staffLeft + spacing * 5;
@@ -373,8 +382,10 @@ function findMeasures(canvas: HTMLCanvasElement, page: number, textItems: ScoreT
       const attachmentWidth = Math.max(5, spacing * (lines.length === 6 ? .5 : .55));
       const attachmentLimit = Math.max(4, Math.round(spacing * .55));
       for (let y = top; y <= bottom; y++) {
-        // Staff lines themselves are horizontal attachments for every vertical line.
-        if (lines.some((line) => Math.abs(y - line) <= Math.max(2, spacing * .22))) continue;
+        // Keep TAB numeral clearance; notation noteheads can sit close to staff lines.
+        if (lines.some((line) => Math.abs(y - line) <= Math.max(2, spacing * .22))
+          && (lines.length === 6 || (isStaffInk(Math.max(staffLeft, bar - spacing * 2), y)
+          && isStaffInk(Math.min(staffRight, bar + spacing * 2), y)))) continue;
         let seed: number | null = null;
         for (let dx = -2; dx <= 2; dx++) {
           if (isDark(bar + dx, y)) { seed = bar + dx; break; }
