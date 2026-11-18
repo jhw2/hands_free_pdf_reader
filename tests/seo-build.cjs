@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 assert.ok(process.argv[2], 'Usage: node tests/seo-build.cjs <running production server URL>');
 const server = process.argv[2];
-const origin = 'https://handsfreepdfreader.vercel.app';
+const origin = 'https://musicup.space';
 const get = (route, headers = {}) => fetch(new URL(route, server), { redirect: 'manual', headers });
 const decode = value => value.replace(/&(?:amp|quot|apos|lt|gt|#39|#x27);/g, entity => ({
   '&amp;': '&', '&quot;': '"', '&apos;': "'", '&lt;': '<', '&gt;': '>', '&#39;': "'", '&#x27;': "'",
@@ -109,9 +109,24 @@ assert.match(robots, /^User-Agent: \*$/im);
 assert.match(robots, /^Allow: \/$/im);
 assert.ok(robots.includes(`Sitemap: ${origin}/sitemap.xml`));
 assert.deepEqual([...robots.matchAll(/^Disallow:\s*(.*)$/gim)].map(([, value]) => value.trim()), ['/api/'], 'public pages and /_next/ assets remain crawlable');
-const sitemap = await (await get('/sitemap.xml')).text();
+const sitemapResponse = await get('/sitemap.xml');
+assert.equal(sitemapResponse.status, 200);
+assert.match(sitemapResponse.headers.get('content-type'), /application\/xml/);
+const sitemap = await sitemapResponse.text();
+assert.match(sitemap, /xmlns:xhtml="http:\/\/www.w3.org\/1999\/xhtml"/);
+assert.doesNotMatch(sitemap, /handsfreepdfreader\.vercel\.app/);
 const locations = [...sitemap.matchAll(/<loc>(.*?)<\/loc>/g)].map(([, value]) => decode(value));
 assert.deepEqual(locations.sort(), ['/ko', '/en', '/ko/score-sync', '/en/score-sync'].map(route => origin + route).sort());
+for (const [, entry] of sitemap.matchAll(/<url>([\s\S]*?)<\/url>/g)) {
+  const location = decode(entry.match(/<loc>(.*?)<\/loc>/)[1]);
+  const suffix = new URL(location).pathname.endsWith('/score-sync') ? '/score-sync' : '';
+  const links = [...entry.matchAll(/<xhtml:link\b[^>]*>/g)].map(([tag]) => attributes(tag));
+  assert.equal(links.length, 3);
+  assert.ok(links.every(link => link.rel === 'alternate'));
+  assert.deepEqual(Object.fromEntries(links.map(link => [link.hreflang, new URL(link.href).href])), {
+    ko: `${origin}/ko${suffix}`, en: `${origin}/en${suffix}`, 'x-default': `${origin}${suffix || '/'}`,
+  }, `${location}: sitemap language links include self and match page metadata`);
+}
 for (const [browser, cookie, language] of [['ko-KR, en;q=0.9', '', 'ko'], ['ja-JP, ko;q=0.5', '', 'en'], ['fr-FR', '', 'en'], ['', '', 'en'], ['en-US', 'reader-language=ko', 'ko'], ['ko-KR', 'reader-language=en', 'en']]) {
   for (const route of ['/', '/score-sync']) {
     const response = await get(`${route}?test=kept`, { 'Accept-Language': browser, Cookie: cookie });

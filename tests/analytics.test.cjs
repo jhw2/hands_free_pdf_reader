@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const { test } = require('node:test');
 const fs = require('node:fs');
 const ts = require('typescript');
-const origin = 'https://handsfreepdfreader.vercel.app';
+const origin = 'https://musicup.space';
 const js = ts.transpileModule(fs.readFileSync('lib/analytics.ts', 'utf8'), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText;
@@ -32,7 +32,7 @@ function analytics(browser, environment = 'production') {
 
 test('local, preview and development events are blocked even when a Google tag is already present', () => {
   const calls = [];
-  for (const testOrigin of ['http://localhost:3001', 'http://127.0.0.1:3000', 'http://[::1]:3000', 'http://192.168.1.2:3000', 'https://preview.vercel.app', `${origin}.example.com`, 'http://handsfreepdfreader.vercel.app']) {
+  for (const testOrigin of ['http://localhost:3001', 'http://127.0.0.1:3000', 'http://[::1]:3000', 'http://192.168.1.2:3000', 'https://preview.vercel.app', `${origin}.example.com`, 'http://musicup.space', 'https://handsfreepdfreader.vercel.app']) {
     const a = analytics({ location: { origin: testOrigin }, gtag: (...args) => calls.push(args) });
     a.trackInteraction('score_play_click');
     assert.equal(a.isAnalyticsEnabled(), false);

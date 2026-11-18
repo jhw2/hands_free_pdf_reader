@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import type { Language } from "./i18n";
 
-export const siteUrl = "https://handsfreepdfreader.vercel.app";
+export const siteUrl = "https://musicup.space";
 const siteName = "Hands-Free PDF Reader";
 
 const copy = {
