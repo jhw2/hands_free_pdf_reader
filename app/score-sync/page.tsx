@@ -11,6 +11,7 @@ import NavigationEditor from "./navigation-editor";
 import { buildNavigationMeasures, navigationEditsMatch, validateNavigationMarkers, type NavigationEdits } from "./navigation-edits";
 import { readLibrary, saveSong, activateSong, deleteSong, type SavedSong } from "./library";
 import { detectTempo, detectImageTempo, resolveTempo } from "./tempo";
+import { countInSecondsOrDefault, prepareCountIn, startCountIn, stopCountIn } from "./count-in";
 import { useLanguage } from "../../lib/use-language";
 
 type ScoreTextItem = { text: string; x: number; y: number; width: number; height: number; fontName: string; fontFamily?: string };
@@ -32,29 +33,6 @@ declare global {
 }
 
 const YOUTUBE_VIDEO_ID = /^[A-Za-z0-9_-]{11}$/;
-
-const stopCountIn = () => {
-  try { window.speechSynthesis?.cancel(); } catch { /* Speech must not interrupt playback controls. */ }
-};
-
-const speakCountIn = (beat: number) => {
-  const word = ["One", "Two", "Three", "Four"][beat];
-  if (!word) return;
-  try {
-    if (!window.speechSynthesis || typeof window.SpeechSynthesisUtterance !== "function") return;
-    // SpeechSynthesis exposes no gender field, so prefer known English female voices by name.
-    const voices = window.speechSynthesis.getVoices().filter(voice => /^en[-_]/i.test(voice.lang));
-    const voice = ["samantha", "microsoft zira", "microsoft aria", "microsoft jenny", "karen", "moira", "tessa", "victoria", "google uk english female", "google us english"]
-      .map(name => voices.find(voice => voice.name.toLowerCase().includes(name))).find(Boolean);
-    if (!voice) return;
-    const utterance = new window.SpeechSynthesisUtterance(word);
-    utterance.voice = voice;
-    utterance.lang = voice.lang;
-    utterance.rate = 1.2;
-    window.speechSynthesis.cancel();
-    window.speechSynthesis.speak(utterance);
-  } catch { /* Keep the visual countdown when speech is unavailable. */ }
-};
 
 const getVideoId = (value: string) => {
   const trimmed = value.trim();
@@ -106,7 +84,7 @@ const readPdfTextItems = async (page: PDFPageProxy) => {
   } finally { reader.releaseLock(); }
 };
 
-type StoredMetadata = Partial<Pick<SavedSong, "youtubeUrl" | "fileName" | "bpm" | "bpmSource" | "beatsPerMeasure" | "offset" | "navigationEdits">>;
+type StoredMetadata = Partial<Pick<SavedSong, "youtubeUrl" | "fileName" | "bpm" | "bpmSource" | "beatsPerMeasure" | "offset" | "countInSeconds" | "navigationEdits">>;
 
 const parseNavigationText = (value: string, fontFamily = "") => {
   const text = value.normalize("NFKC").replace(/\s+/g, " ").trim();
@@ -757,7 +735,8 @@ function findMeasures(canvas: HTMLCanvasElement, page: number, textItems: ScoreT
 export default function ScoreSyncPage() {
   const { language, chooseLanguage, t } = useLanguage();
   useEffect(() => {
-    try { window.speechSynthesis?.getVoices(); } catch { /* Visual countdown remains available. */ }
+    void prepareCountIn();
+    return stopCountIn;
   }, []);
   const [expanded, setExpanded] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
@@ -784,8 +763,10 @@ export default function ScoreSyncPage() {
   const [bpm, setBpm] = useState(120);
   const [beatsPerMeasure, setBeatsPerMeasure] = useState(4);
   const [tempoDetected, setTempoDetected] = useState(false);
+  const [bpmNeedsInput, setBpmNeedsInput] = useState(false);
   const [time, setTime] = useState(0);
   const [playing, setPlaying] = useState(false);
+  const [countInSeconds, setCountInSeconds] = useState(4);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [countdownMeasure, setCountdownMeasure] = useState<number | null>(null);
   const [playerReady, setPlayerReady] = useState(false);
@@ -847,6 +828,14 @@ export default function ScoreSyncPage() {
     return storeMetadata({ navigationEdits: edits });
   };
   const [showNavigationWarning, setShowNavigationWarning] = useState(false);
+  const [showTempoWarning, setShowTempoWarning] = useState(false);
+  useEffect(() => {
+    setShowTempoWarning(false);
+    if (!bpmNeedsInput || !pages.length || loading || restoring) return;
+    setShowTempoWarning(true);
+    const timer = window.setTimeout(() => setShowTempoWarning(false), 5000);
+    return () => window.clearTimeout(timer);
+  }, [bpmNeedsInput, pages, loading, restoring]);
   useEffect(() => {
     setShowNavigationWarning(false);
     if (loading || restoring || navigation.valid || !measures.some(measure =>
@@ -967,7 +956,7 @@ export default function ScoreSyncPage() {
             cancelCountdown();
             desiredPlayingRef.current = false;
             setPlaying(false);
-            setError("브라우저가 4초 후 자동 재생을 차단했어요. 위의 재생 버튼을 한 번 눌러 주세요.");
+            setError("브라우저가 자동 재생을 차단했어요. 재생 버튼을 한 번 눌러 주세요.");
           },
         },
       });
@@ -1075,8 +1064,10 @@ export default function ScoreSyncPage() {
       const tempo = resolveTempo(savedSong, detectedBpm);
       setBpm(tempo.bpm);
       setTempoDetected(tempo.bpmSource === "detected");
+      setBpmNeedsInput(tempo.bpmSource === "default");
       setBeatsPerMeasure(savedSong?.beatsPerMeasure ?? detectedBeats);
       setOffset(savedSong?.offset ?? 0);
+      setCountInSeconds(countInSecondsOrDefault(savedSong?.countInSeconds));
       setPages(nextPages); setMeasures(nextMeasures); setNavigationEdits(savedSong?.navigationEdits ?? null);
       if (!nextMeasures.length) setError("오선 5개를 정확히 확인할 수 없어요. 더 선명한 악보 PDF를 사용해 주세요.");
       if (shouldPersist) {
@@ -1190,7 +1181,7 @@ export default function ScoreSyncPage() {
     const nextOccurrence = playbackOrder.findIndex((measure, step) => step >= currentStep && measure === index);
     const targetStep = index === 0 ? 0 : nextOccurrence >= 0 ? nextOccurrence : Math.max(0, playbackOrder.indexOf(index));
     const target = offset + targetStep * secondsPerMeasure;
-    const leadIn = Math.min(.5, target);
+    const leadIn = Math.min(countInSeconds === 0 ? .1 : .5, target);
     const seekTarget = target - leadIn;
     const videoDuration = player.getDuration();
     if (videoDuration > 0 && target >= videoDuration) { setError("선택한 마디가 영상 길이를 벗어나요. BPM과 시작 시간을 확인해 주세요."); return; }
@@ -1201,14 +1192,14 @@ export default function ScoreSyncPage() {
     setPlaying(false);
     setError("");
     setExpanded(false);
-    setCountdown(4);
+    setCountdown(countInSeconds);
     setCountdownMeasure(index);
     const startedAt = performance.now();
     let lastSeekAt = startedAt;
     let attempts = 1;
     let holding = false;
-    let resuming = false;
-    let spokenBeat = 0;
+    // With no count-in, let the load play immediately instead of pausing to wait.
+    let resuming = countInSeconds === 0;
     let resumeSample: { time: number; at: number } | null = null;
     const failed = () => {
       cancelCountdown();
@@ -1221,27 +1212,21 @@ export default function ScoreSyncPage() {
     try {
       // Load the selected video and time explicitly; seekTo can leave an unstarted player unloaded.
       player.mute(); player.loadVideoById({ videoId, startSeconds: seekTarget });
-      speakCountIn(0);
+      const countElapsed = startCountIn(countInSeconds);
       const timer = window.setInterval(() => {
         if (playerRef.current !== player || countdownTimerRef.current !== timer) return;
         try {
           const now = performance.now();
-          const elapsed = now - startedAt;
-          const beat = Math.min(4, Math.floor(elapsed / 1000));
-          if (beat !== spokenBeat) {
-            spokenBeat = beat;
-            if (beat < 4) speakCountIn(beat);
-            else stopCountIn();
-          }
+          const elapsed = countElapsed();
           const position = player.getCurrentTime();
           const state = player.getPlayerState();
-          if (elapsed >= 12000) { failed(); return; }
+          if (now - startedAt >= 12000) { failed(); return; }
           if (resuming) {
             // A paused timestamp can be optimistic. Verify advancing playback before releasing audio or tracking.
             if (state === 1 && position >= seekTarget && position <= target + .15) {
               if (resumeSample && position > resumeSample.time + .015
                 && position - resumeSample.time <= (now - resumeSample.at) / 1000 + .1
-                && position >= target && elapsed >= 4000) {
+                && position >= target && elapsed >= countInSeconds * 1000) {
                 cancelCountdown();
                 desiredPlayingRef.current = true;
                 lastProgressRef.current = { time: position, changedAt: now };
@@ -1256,16 +1241,16 @@ export default function ScoreSyncPage() {
                 player.seekTo(seekTarget, true); player.playVideo(); lastSeekAt = now; attempts++;
               }
             }
-            setCountdown(Math.max(0, 4 - Math.floor(elapsed / 1000)));
+            setCountdown(Math.max(0, countInSeconds - Math.floor(elapsed / 1000)));
             return;
           }
           const reached = Math.abs(position - seekTarget) <= .15 && state === 2;
           // Verify playback in a silent lead-in so checking it does not consume the measure's first beat.
-          if (reached && elapsed >= 4000 - leadIn * 1000) {
+          if (reached && elapsed >= countInSeconds * 1000 - leadIn * 1000) {
             resuming = true;
             lastSeekAt = now;
             attempts = 0;
-            setCountdown(Math.max(0, 4 - Math.floor(elapsed / 1000)));
+            setCountdown(Math.max(0, countInSeconds - Math.floor(elapsed / 1000)));
             player.playVideo();
             return;
           }
@@ -1278,7 +1263,7 @@ export default function ScoreSyncPage() {
           } else if (!reached && holding && attempts < 3 && now - lastSeekAt >= 1000) {
             player.seekTo(seekTarget, true); lastSeekAt = now; attempts++;
           }
-          setCountdown(Math.max(0, 4 - Math.floor(elapsed / 1000)));
+          setCountdown(Math.max(0, countInSeconds - Math.floor(elapsed / 1000)));
         } catch { failed(); }
       }, 50);
       countdownTimerRef.current = timer;
@@ -1312,6 +1297,7 @@ export default function ScoreSyncPage() {
     const next = Math.max(30, Math.min(300, value || 30));
     setBpm(next);
     setTempoDetected(false);
+    setBpmNeedsInput(false);
     try { storeMetadata({ bpm: next, bpmSource: "manual" }); } catch { /* Playback can continue without persistence. */ }
   };
 
@@ -1321,26 +1307,27 @@ export default function ScoreSyncPage() {
   };
 
   const title = fileName.replace(/\.pdf$/i, "");
+  const tempoWarning = t("악보에서 BPM을 찾지 못했어요. 현재 {bpm}은 기본값입니다. 정확한 BPM을 입력해야 음악과 악보의 싱크가 맞아요.", { bpm });
   const readyToPlay = playerReady && getVideoId(url) === videoId;
   const openFile = () => fileInputRef.current?.click();
 
   return <main className={styles.shell}>
     <input data-analytics-change="score_pdf_select" ref={fileInputRef} type="file" accept="application/pdf" onChange={loadPdf} hidden disabled={loading || restoring || deleting} aria-label={t("악보 PDF 선택")}/>
     {error && <p className={styles.error} role="alert">{typeof error === "number" ? youtubeErrorMessage(error, t) : t(error)}</p>}
-    {!error && !loading && !restoring && showNavigationWarning && <p className={styles.warning} role="status">{t("반복 경로를 확정하지 못해 악보 순서대로 표시합니다.")}</p>}
+    {!error && !loading && !restoring && (showTempoWarning || showNavigationWarning) && <p className={styles.warning} role="status">{showTempoWarning ? tempoWarning : t("반복 경로를 확정하지 못해 악보 순서대로 표시합니다.")}</p>}
     <section className={styles.scorePanel} aria-label={t("악보")}>
       <div className={styles.pages}>
         {loading ? <div className={styles.empty} role="status"><span className={styles.spinner}/><h2>{t("악보에서 마디를 찾고 있어요")}</h2><p>{t("준비가 끝나면 원하는 마디부터 연습할 수 있어요.")}</p></div> : !pages.length ? <div className={styles.empty}>
           <span className={styles.eyebrow}>{t("악보와 음악, 한곳에서")}</span>
           <div className={styles.note} aria-hidden="true">♫</div>
           <h1>{t("YouTube와 함께하는")}<br/>{t("PDF 악보 연습")}</h1>
-          <p>{t("PDF 악보의 마디를 음악에 맞춰 표시해요.")}<br/>{t("원하는 마디를 눌러 4초 카운트 후 연습하세요.")}</p>
+          <p>{t("PDF 악보의 마디를 음악에 맞춰 표시해요.")}<br/>{t("원하는 마디를 눌러 설정한 카운트 후 연습하세요.")}</p>
           <button data-analytics-click="score_pdf_open_click" className={styles.primaryButton} onClick={openFile} disabled={restoring || deleting}>{t("＋ 악보 PDF 열기")}</button>
           {songs.length > 0 && <button data-analytics-click="score_library_toggle_click" className={styles.textButton} onClick={() => { setExpanded(true); setLibraryOpen(true); }}>{t("악보 목록에서 선택하기 · {count}곡", { count: songs.length })}</button>}
           <div className={styles.steps}><span><b>1</b> {t("악보 열기")}</span><span><b>2</b> {t("YouTube 연결")}</span><span><b>3</b> {t("원하는 마디부터")}</span></div>
           <Link className={styles.readerLink} href={`/${language}`}>{t("입으로 넘기는 PDF 악보 보기 →")}</Link>
           {restoring && <span role="status">{t("보관함을 열고 있어요")}</span>}
-        </div> : pages.map((src, pageIndex) => <div className={styles.page} key={src}><img src={src} alt={t("악보 {page}페이지", { page: pageIndex + 1 })}/>{measures.map((box, index) => box.page === pageIndex + 1 && <button data-analytics-click="score_measure_click" key={box.id} data-current={index === activeIndex ? "true" : undefined} onClick={() => jumpToMeasure(index)} className={`${styles.system} ${index === activeIndex ? styles.active : ""}`} style={{ top: `${box.top}%`, left: `${box.left}%`, width: `${box.width}%`, height: `${box.height}%` }} aria-label={t("{number}번 마디로 이동", { number: index + 1 })}><span aria-hidden="true">{index + 1}</span>{countdown !== null && countdownMeasure === index ? <b className={styles.measureCountdown} role="timer" aria-live="assertive" aria-label={countdown === 0 ? t("재생 위치 확인 중") : undefined}>{countdown === 0 ? "…" : 5 - countdown}</b> : null}</button>)}</div>)}
+        </div> : pages.map((src, pageIndex) => <div className={styles.page} key={src}><img src={src} alt={t("악보 {page}페이지", { page: pageIndex + 1 })}/>{measures.map((box, index) => box.page === pageIndex + 1 && <button data-analytics-click="score_measure_click" key={box.id} data-current={index === activeIndex ? "true" : undefined} onClick={() => jumpToMeasure(index)} className={`${styles.system} ${index === activeIndex ? styles.active : ""}`} style={{ top: `${box.top}%`, left: `${box.left}%`, width: `${box.width}%`, height: `${box.height}%` }} aria-label={t("{number}번 마디로 이동", { number: index + 1 })}><span aria-hidden="true">{index + 1}</span>{countInSeconds > 0 && countdown !== null && countdownMeasure === index ? <b className={styles.measureCountdown} role="timer" aria-live="assertive" aria-label={countdown === 0 ? t("재생 위치 확인 중") : undefined}>{countdown === 0 ? "…" : countInSeconds + 1 - countdown}</b> : null}</button>)}</div>)}
       </div>
     </section>
     <footer className={styles.dock} aria-label={t("연습 메뉴")}>
@@ -1358,7 +1345,7 @@ export default function ScoreSyncPage() {
       </div>
       <div className={styles.progress} aria-hidden="true"><span style={{ width: `${Math.min(100, time / duration * 100)}%` }}/></div>
       <div id="practice-menu" className={styles.drawerBody} hidden={!expanded}>
-        <div className={styles.menuTools}><label>{t("언어")}<select data-analytics-change="score_language_change" value={language} disabled={loading || restoring || deleting || unsavedIds.size > 0} title={unsavedIds.size ? t("저장 후 언어를 바꿀 수 있어요.") : undefined} onChange={event => chooseLanguage(event.target.value as "ko" | "en")}><option value="ko" lang="ko">한국어</option><option value="en" lang="en">English</option></select></label></div>
+        <div className={styles.menuTools}><label className={styles.countInSetting}>{t("시작 전 카운트")}<select data-analytics-change="score_count_in_change" value={countInSeconds} disabled={!pages.length || loading || restoring || deleting || countdown !== null} onChange={event => { const value = countInSecondsOrDefault(Number(event.target.value)); setCountInSeconds(value); storeMetadata({ countInSeconds: value }); }}>{[0, 1, 2, 3, 4].map(seconds => <option key={seconds} value={seconds}>{seconds === 0 ? t("0초 (카운트 없음)") : t("{seconds}초", { seconds })}</option>)}</select></label><label>{t("언어")}<select data-analytics-change="score_language_change" value={language} disabled={loading || restoring || deleting || unsavedIds.size > 0} title={unsavedIds.size ? t("저장 후 언어를 바꿀 수 있어요.") : undefined} onChange={event => chooseLanguage(event.target.value as "ko" | "en")}><option value="ko" lang="ko">한국어</option><option value="en" lang="en">English</option></select></label></div>
         <div className={styles.menuHeading}><button data-analytics-click="score_library_toggle_click" className={styles.secondaryButton} aria-pressed={libraryOpen} onClick={() => setLibraryOpen(value => !value)}>{t("악보 목록")}</button><button data-analytics-click="score_pdf_open_click" className={styles.primaryButton} onClick={openFile} disabled={loading || restoring || deleting}>{t("＋ 새 악보 추가")}</button></div>
         {saveError && <div className={styles.saveError} role="alert"><span>{t(saveError)}</span>{currentSongRef.current && <button data-analytics-click="score_save_retry_click" onClick={() => storeMetadata({})}>{t("다시 저장")}</button>}</div>}
         <section hidden={!libraryOpen} aria-label={t("악보 목록")}>
@@ -1373,9 +1360,9 @@ export default function ScoreSyncPage() {
             <div className={styles.connection}><YoutubeSearch value={url} disabled={!pages.length || loading || restoring || deleting} isLink={!!getVideoId(url)} onChange={updateYoutubeUrl} onConnect={attachYoutube}/>
               {readyToPlay && <p className={styles.readyHint}>{t("● 연결됐어요. 재생 버튼을 누르거나 악보의 마디를 눌러보세요.")}</p>}
               <details className={styles.syncSettings} open><summary data-analytics-click="score_sync_toggle_click">{t("싱크 조절")} <span>{t("BPM · 박자 · 시작 시간")}</span></summary><fieldset disabled={!pages.length || loading || restoring || deleting}>
-                <div className={styles.settingsRow}><label>{t(tempoDetected ? "감지한 BPM" : "BPM")}<input data-analytics-change="score_bpm_change" type="number" min="30" max="300" value={bpm} onChange={event => updateBpm(Number(event.target.value))}/></label><label>{t("한 마디 박자")}<select data-analytics-change="score_beats_change" value={beatsPerMeasure} onChange={event => updateBeatsPerMeasure(Number(event.target.value))}>{[2,3,4,5,6,7,8,9,10,11,12].map(beats => <option key={beats} value={beats}>{t("{beats}박", { beats })}</option>)}</select></label>
+                <div className={styles.settingsRow}><label>{t(tempoDetected ? "감지한 BPM" : "BPM")}<input data-analytics-change="score_bpm_change" aria-describedby={bpmNeedsInput ? "bpm-guidance" : undefined} type="number" min="30" max="300" value={bpm} onChange={event => updateBpm(Number(event.target.value))}/></label><label>{t("한 마디 박자")}<select data-analytics-change="score_beats_change" value={beatsPerMeasure} onChange={event => updateBeatsPerMeasure(Number(event.target.value))}>{[2,3,4,5,6,7,8,9,10,11,12].map(beats => <option key={beats} value={beats}>{t("{beats}박", { beats })}</option>)}</select></label>
                 <label>{t("첫 마디 시작 (초)")}<input data-analytics-change="score_offset_change" aria-label={t("악보 첫 마디 시작 시간 (초)")} type="number" inputMode="decimal" min="0" step="0.1" value={offset} onFocus={event => event.currentTarget.select()} onChange={event => { const value = Number(event.target.value); if (!Number.isFinite(value) || value < 0) return; setOffset(value); storeMetadata({ offset: value }); }}/></label></div>
-                <p>{t("음원과 악보가 어긋날 때만 조절하세요. 설정은 이 곡에 자동 저장됩니다.")}</p>
+                <p id="bpm-guidance">{bpmNeedsInput ? tempoWarning : t("음원과 악보가 어긋날 때만 조절하세요. 설정은 이 곡에 자동 저장됩니다.")}</p>
               </fieldset></details>
               {measures.length > 0 && <NavigationEditor key={currentSongRef.current?.id} measures={measures} saved={navigationEdits} disabled={loading || restoring || deleting} onSave={saveNavigationEdits}/>}
             </div>

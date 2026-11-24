@@ -9,6 +9,7 @@ export type SavedSong = {
   bpmSource?: "detected" | "manual" | "default";
   beatsPerMeasure: number;
   offset: number;
+  countInSeconds?: number;
   navigationEdits?: NavigationEdits | null;
   updatedAt: number;
 };

@@ -58,7 +58,7 @@ function session(storageFails = false) {
   const cleared = [];
   const metadata = { youtubeUrl: 'https://youtu.be/abcdefghijk', fileName: 'score.pdf' };
   const env = {
-    stopCountIn: () => {}, speakCountIn: () => {}, setExpanded: () => {},
+    stopCountIn: () => {}, setExpanded: () => {},
     countdownTimerRef: { current: 42 }, desiredPlayingRef: { current: true }, playerReadyRef: { current: true },
     lastSelectedTargetRef: { current: 90 }, youtubeRetryRef: { current: 1 },
     window: { clearInterval: id => cleared.push(id) },
@@ -132,7 +132,7 @@ test('delayed YouTube seek samples cannot replace the selected measure during it
   assert.equal(displayedTime, 121, 'normal playback tracking resumes after the countdown');
 });
 
-function seeking({ ready = true, url = 'abcdefghijk', advancing = false, unstarted = false, time = 0, offset = 0, playbackOrder = Array.from({ length: 150 }, (_, i) => i) } = {}) {
+function seeking({ countInSeconds = 4, ready = true, url = 'abcdefghijk', advancing = false, unstarted = false, time = 0, offset = 0, playbackOrder = Array.from({ length: 150 }, (_, i) => i) } = {}) {
   const harness = session();
   const { env, state } = harness;
   let now = 0, position = 0, playerState = unstarted ? -1 : 2, muted = false, nextTimer = 0;
@@ -148,10 +148,10 @@ function seeking({ ready = true, url = 'abcdefghijk', advancing = false, unstart
     pauseVideo: () => { playerState = 2; commands.push('pause'); },
   };
   Object.assign(env, {
-    speakCountIn: beat => speech.push(beat), stopCountIn: () => speech.push('stop'),
+    startCountIn: seconds => { speech.push(seconds); const start = now; return () => now - start; }, stopCountIn: () => speech.push('stop'),
     playerRef: { current: player }, playerReadyRef: { current: ready }, countdownTimerRef: { current: null },
     videoId: 'abcdefghijk', url, getVideoId: value => value,
-    bpm: 120, beatsPerMeasure: 4, time, offset, playbackOrder,
+    bpm: 120, beatsPerMeasure: 4, time, offset, playbackOrder, countInSeconds,
     lastProgressRef: { current: { time: 0, changedAt: 0 } }, performance: { now: () => now },
     window: { setInterval: fn => { timers.set(++nextTimer, fn); return nextTimer; }, clearInterval: id => timers.delete(id), setTimeout: () => {} },
   });
@@ -179,14 +179,13 @@ test('clicking the first measure restarts at the offset even when a later repeat
   }
 });
 
-test('count-in speaks one two three four once per second and stops before playback or on cancellation', () => {
+test('schedules count-in once and cancels it on another measure or URL change', () => {
   const h = seeking();
   h.select(30);
   for (let at = 50; at <= 5000; at += 50) h.tick(at);
-  assert.deepEqual(h.speech.filter(item => typeof item === 'number'), [0, 1, 2, 3]);
-  assert.equal(h.speech.at(-1), 'stop');
+  assert.deepEqual(h.speech.filter(item => typeof item === 'number'), [4]);
   h.select(40);
-  assert.deepEqual(h.speech.slice(-2), ['stop', 0]);
+  assert.deepEqual(h.speech.slice(-2), ['stop', 4]);
   h.edit('lmnopqrstuv');
   const count = h.speech.length;
   h.tick(6000);
@@ -194,19 +193,85 @@ test('count-in speaks one two three four once per second and stops before playba
   assert.equal(h.speech.at(-1), 'stop');
 });
 
-test('late countdown ticks skip expired spoken numbers instead of queuing a burst', () => {
+test('late UI ticks catch up without scheduling more audio', () => {
   const h = seeking();
   h.select(30);
   h.tick(2500);
+  assert.equal(h.state.Countdown, 2);
   h.tick(5000);
-  assert.deepEqual(h.speech.filter(item => typeof item === 'number'), [0, 2]);
-  assert.equal(h.speech.at(-1), 'stop');
+  assert.equal(h.state.Countdown, 0);
+  assert.deepEqual(h.speech.filter(item => typeof item === 'number'), [4]);
+});
+
+test('0–4 seconds respect the selected duration and verify the correct target before unmuting', () => {
+  for (const seconds of [0, 1, 2, 3, 4]) {
+    const h = seeking({ countInSeconds: seconds, advancing: true });
+    h.select(30);
+    assert.equal(h.state.Countdown, seconds);
+    for (let at = 50; at <= 5000; at += 50) {
+      h.tick(at);
+      if (at < seconds * 1000) assert.deepEqual(h.audible, []);
+      if (h.audible.length) {
+        assert.ok(at < seconds * 1000 + 800, 'no extra four-second wait');
+        break;
+      }
+    }
+    assert.equal(h.audible.length, 1);
+    assert.ok(Math.abs(h.audible[0] - 60) < .15);
+    assert.equal(h.state.Countdown, null);
+    assert.equal(h.speech.at(-1), 'stop');
+  }
 });
 
 function confirmPlayback(h, target, at) {
   h.position(target + .04); h.tick(at + 50);
   h.position(target + .08); h.tick(at + 100);
 }
+
+test('zero count-in plays as soon as the target advances without a pause or half-second lead-in', () => {
+  for (const index of [0, 30]) {
+    const h = seeking({ countInSeconds: 0, advancing: true });
+    h.select(index);
+    const target = index * 2;
+    assert.deepEqual(h.commands[1], ['load', { videoId: 'abcdefghijk', startSeconds: Math.max(0, target - .1) }]);
+    for (let at = 50; at <= 200 && !h.audible.length; at += 50) h.tick(at);
+    assert.equal(h.audible.length, 1);
+    assert.ok(h.audible[0] >= target && h.audible[0] <= target + .15);
+    assert.equal(h.commands.includes('pause'), false);
+    assert.equal(h.timers.size, 0);
+  }
+});
+
+test('zero count-in still rejects wrong positions and cancels stale playback requests', () => {
+  const h = seeking({ countInSeconds: 0 });
+  h.select(30);
+  const previous = [...h.timers.values()][0];
+  h.position(240); h.tick(50);
+  h.position(0); h.tick(100);
+  assert.deepEqual(h.audible, []);
+  h.select(40);
+  const count = h.commands.length;
+  previous();
+  assert.equal(h.commands.length, count);
+  confirmPlayback(h, 80, 100);
+  assert.equal(h.audible.length, 1);
+  assert.equal(h.timers.size, 0);
+});
+
+test('zero count-in never renders a countdown badge, including the pending-position ellipsis', () => {
+  let condition;
+  function visit(node) {
+    if (ts.isConditionalExpression(node) && node.whenTrue.getText(source).includes('className={styles.measureCountdown}')) condition = node.condition.getText(source);
+    ts.forEachChild(node, visit);
+  }
+  visit(source);
+  assert.ok(condition);
+  const visible = new Function('countInSeconds', 'countdown', 'countdownMeasure', 'index', `return ${condition};`);
+  assert.equal(visible(0, 0, 30, 30), false);
+  assert.equal(visible(4, 4, 30, 30), true);
+  assert.equal(visible(4, 0, 30, 30), true);
+  assert.equal(visible(4, null, null, 30), false);
+});
 
 test('forward and backward jumps hold the target even when the next player sample arrives late', () => {
   const h = seeking({ advancing: true });

@@ -44,7 +44,7 @@
 .drawerBody { max-height: min(62dvh, 560px); overflow: auto; padding: 24px max(24px, calc((100vw - 1052px) / 2)) 28px; overscroll-behavior: contain; }
 .drawerBody[hidden], .drawerBody section[hidden], .miniPlayer[hidden] { display: none; }
 .menuHeading { display: flex; justify-content: space-between; align-items: center; gap: 20px; margin-bottom: 24px; }
-.menuTools { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-bottom: 16px; font-size: 12px; color: #53614f; }
+.menuTools { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; margin-bottom: 16px; font-size: 12px; color: #53614f; }
 .menuTools label { display: flex; align-items: center; gap: 8px; }
 .menuTools select { min-height: 40px; border: 1px solid #dcded1; border-radius: 7px; padding: 6px 10px; background: #fffefa; color: #35432e; }
 .stepLabel { font-size: 11px; color: #8c715e; font-weight: 600; letter-spacing: .02em; }
@@ -137,3 +137,6 @@
 .markerActions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 12px; color: #55614c; }
 .markerActions .textButton { padding: 8px; margin: 0; font-size: 11px; }
 .syncSettings .routePreview { padding: 10px; background: #edf1e7; border-radius: 7px; color: #344a3b; }
+
+.countInSetting { margin-right: auto; }
+.countInSetting select { font-size: 16px; }
