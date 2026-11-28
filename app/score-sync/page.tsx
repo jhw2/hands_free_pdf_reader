@@ -761,6 +761,7 @@ export default function ScoreSyncPage() {
   const [duration, setDuration] = useState(240);
   const [offset, setOffset] = useState(0);
   const [bpm, setBpm] = useState(120);
+  const [bpmInput, setBpmInput] = useState<string | null>(null);
   const [beatsPerMeasure, setBeatsPerMeasure] = useState(4);
   const [tempoDetected, setTempoDetected] = useState(false);
   const [bpmNeedsInput, setBpmNeedsInput] = useState(false);
@@ -1008,7 +1009,7 @@ export default function ScoreSyncPage() {
     if (shouldPersist) {
       ++saveVersionRef.current;
       disconnectYoutube(false); currentSongRef.current = null;
-      setBpm(120); setBeatsPerMeasure(4); setTempoDetected(false);
+      setBpm(120); setBpmInput(null); setBeatsPerMeasure(4); setTempoDetected(false);
       setExpanded(true); setLibraryOpen(false); setSaveError("");
     }
     try {
@@ -1063,6 +1064,7 @@ export default function ScoreSyncPage() {
       const detectedBeats = detectBeatsPerMeasure(scoreText.join(" "));
       const tempo = resolveTempo(savedSong, detectedBpm);
       setBpm(tempo.bpm);
+      setBpmInput(null);
       setTempoDetected(tempo.bpmSource === "detected");
       setBpmNeedsInput(tempo.bpmSource === "default");
       setBeatsPerMeasure(savedSong?.beatsPerMeasure ?? detectedBeats);
@@ -1294,11 +1296,11 @@ export default function ScoreSyncPage() {
   };
 
   const updateBpm = (value: number) => {
-    const next = Math.max(30, Math.min(300, value || 30));
-    setBpm(next);
+    if (!Number.isFinite(value) || value < 30 || value > 300) return;
+    setBpm(value);
     setTempoDetected(false);
     setBpmNeedsInput(false);
-    try { storeMetadata({ bpm: next, bpmSource: "manual" }); } catch { /* Playback can continue without persistence. */ }
+    try { storeMetadata({ bpm: value, bpmSource: "manual" }); } catch { /* Playback can continue without persistence. */ }
   };
 
   const updateBeatsPerMeasure = (value: number) => {
@@ -1360,7 +1362,7 @@ export default function ScoreSyncPage() {
             <div className={styles.connection}><YoutubeSearch value={url} disabled={!pages.length || loading || restoring || deleting} isLink={!!getVideoId(url)} onChange={updateYoutubeUrl} onConnect={attachYoutube}/>
               {readyToPlay && <p className={styles.readyHint}>{t("● 연결됐어요. 재생 버튼을 누르거나 악보의 마디를 눌러보세요.")}</p>}
               <details className={styles.syncSettings} open><summary data-analytics-click="score_sync_toggle_click">{t("싱크 조절")} <span>{t("BPM · 박자 · 시작 시간")}</span></summary><fieldset disabled={!pages.length || loading || restoring || deleting}>
-                <div className={styles.settingsRow}><label>{t(tempoDetected ? "감지한 BPM" : "BPM")}<input data-analytics-change="score_bpm_change" aria-describedby={bpmNeedsInput ? "bpm-guidance" : undefined} type="number" min="30" max="300" value={bpm} onChange={event => updateBpm(Number(event.target.value))}/></label><label>{t("한 마디 박자")}<select data-analytics-change="score_beats_change" value={beatsPerMeasure} onChange={event => updateBeatsPerMeasure(Number(event.target.value))}>{[2,3,4,5,6,7,8,9,10,11,12].map(beats => <option key={beats} value={beats}>{t("{beats}박", { beats })}</option>)}</select></label>
+                <div className={styles.settingsRow}><label>{t(tempoDetected ? "감지한 BPM" : "BPM")}<input data-analytics-change="score_bpm_change" aria-describedby={bpmNeedsInput ? "bpm-guidance" : undefined} type="number" inputMode="decimal" min="30" max="300" step="any" value={bpmInput ?? bpm} onChange={event => setBpmInput(event.target.value)} onBlur={event => { const value = event.currentTarget.value; setBpmInput(null); if (value.trim()) updateBpm(Number(value)); }} onKeyDown={event => { if (event.key === "Enter") { event.preventDefault(); event.currentTarget.blur(); } }}/></label><label>{t("한 마디 박자")}<select data-analytics-change="score_beats_change" value={beatsPerMeasure} onChange={event => updateBeatsPerMeasure(Number(event.target.value))}>{[2,3,4,5,6,7,8,9,10,11,12].map(beats => <option key={beats} value={beats}>{t("{beats}박", { beats })}</option>)}</select></label>
                 <label>{t("첫 마디 시작 (초)")}<input data-analytics-change="score_offset_change" aria-label={t("악보 첫 마디 시작 시간 (초)")} type="number" inputMode="decimal" min="0" step="0.1" value={offset} onFocus={event => event.currentTarget.select()} onChange={event => { const value = Number(event.target.value); if (!Number.isFinite(value) || value < 0) return; setOffset(value); storeMetadata({ offset: value }); }}/></label></div>
                 <p id="bpm-guidance">{bpmNeedsInput ? tempoWarning : t("음원과 악보가 어긋날 때만 조절하세요. 설정은 이 곡에 자동 저장됩니다.")}</p>
               </fieldset></details>
