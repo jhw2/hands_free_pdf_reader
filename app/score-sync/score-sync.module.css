@@ -34,6 +34,10 @@
 .transport { max-width: 1100px; margin: auto; display: flex; gap: 16px; align-items: center; padding: 4px 24px 13px; }
 .playButton { display: grid; place-items: center; width: 48px; height: 48px; flex-shrink: 0; padding: 0; border: 0; border-radius: 50%; background: #344a3b; color: white; }
 .playButton:hover { background: #253c2d; }
+.repeatButton { position: relative; display: grid; place-items: center; width: 44px; height: 44px; flex-shrink: 0; padding: 0; border: 1px solid transparent; border-radius: 50%; background: transparent; color: #69745f; }
+.repeatButton:hover { background: #f0f2e9; }
+.repeatButton[aria-pressed="true"] { color: #344a3b; background: #e5eddf; border-color: #a9bb9d; }
+.repeatButton[aria-pressed="true"]::after { content: ""; position: absolute; bottom: 3px; width: 4px; height: 4px; border-radius: 50%; background: currentColor; }
 .nowPlaying { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
 .nowPlaying strong { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nowPlaying span { font-size: 11px; color: #69745f; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -140,3 +144,39 @@
 
 .countInSetting { margin-right: auto; }
 .countInSetting select { font-size: 16px; }
+
+.playbackOptions { position: relative; display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+
+
+.speedMenu { position: relative; }
+.speedTrigger { min-height: 44px; min-width: 72px; padding: 6px 12px; border: 1px solid #dcded1; border-radius: 22px; background: #fffefa; color: #35432e; font-size: 14px; font-variant-numeric: tabular-nums; }
+.speedTrigger:hover { background: #edf1e7; color: #35432e; border-color: #a9bb9d; }
+.speedTrigger[aria-expanded="true"] { background: #e5eddf; border-color: #a9bb9d; }
+.speedPanel { position: absolute; z-index: 10; right: 0; bottom: calc(100% + 12px); width: min(312px, calc(100vw - 28px)); max-height: calc(100dvh - 130px); overflow-y: auto; padding: 12px 16px 16px; border: 1px solid #ffffff20; border-radius: 16px; background: #282828; color: #fff; box-shadow: 0 8px 32px #0005; }
+.speedHeading { display: flex; align-items: center; justify-content: space-between; font-size: 14px; }
+.speedClose, .speedStep { display: grid; place-items: center; width: 40px; height: 40px; flex-shrink: 0; border: 0; border-radius: 50%; padding: 0; color: inherit; background: #ffffff14; }
+.speedClose { background: transparent; }
+.speedClose:hover, .speedStep:hover { background: #ffffff26; }
+.speedValue { display: block; text-align: center; font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums; margin: 4px 0 12px; }
+.speedSliderRow { display: flex; align-items: center; gap: 12px; }
+.speedSlider { flex: 1; min-width: 0; height: 40px; margin: 0; accent-color: #fff; cursor: pointer; }
+.speedHint { margin: 8px 0 16px; color: #bbb; font-size: 11px; text-align: center; }
+.speedPresets { display: flex; gap: 8px; }
+.speedPresets button { flex: 1; min-width: 0; min-height: 40px; padding: 6px; border: 1px solid #ffffff38; border-radius: 8px; background: transparent; color: inherit; font-size: 12px; }
+.speedPresets button[aria-pressed="true"] { background: #fff; border-color: #fff; color: #222; }
+
+.loopMenu { display: flex; }
+.loopTrigger { min-width: 48px; padding: 6px 10px; font-size: 12px; }
+.loopTrigger[aria-pressed="true"] { background: #e5eddf; color: #344a3b; border-color: #a9bb9d; }
+.loopFields { display: flex; align-items: flex-end; gap: 12px; margin-top: 12px; }
+.loopFields label { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 8px; font-size: 12px; color: #ddd; }
+.loopFields input { width: 100%; min-width: 0; height: 44px; padding: 8px 10px; border: 1px solid #ffffff50; border-radius: 8px; color: #fff; background: #ffffff10; font-size: 16px; }
+.loopFields > span { line-height: 44px; }
+.loopError { font-size: 12px; line-height: 1.5; color: #ffc2b6; }
+.loopActions { display: flex; gap: 8px; margin-top: 16px; }
+.loopActions button { flex: 1; min-height: 44px; padding: 8px; border: 1px solid #ffffff50; border-radius: 8px; background: transparent; color: #fff; font-size: 12px; }
+.loopActions button[type="submit"] { background: #fff; color: #222; }
+.system[data-loop="true"] { background: #5c915f18; }
+.system[data-loop="true"] span { color: #3c7842; }
+.system[data-loop="true"].active { background: #ef4b2f24; }
+.system[data-loop="true"].active span { color: #e53e2b; }

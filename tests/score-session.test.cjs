@@ -59,7 +59,7 @@ function session(storageFails = false) {
   const metadata = { youtubeUrl: 'https://youtu.be/abcdefghijk', fileName: 'score.pdf' };
   const env = {
     stopCountIn: () => {}, setExpanded: () => {},
-    countdownTimerRef: { current: 42 }, desiredPlayingRef: { current: true }, playerReadyRef: { current: true },
+    measureLoopRef: { current: null }, clearMeasureLoop() { env.measureLoopRef.current = null; }, restartMeasureLoop: () => false, keyboardSeekRef: { current: null }, countdownTimerRef: { current: 42 }, desiredPlayingRef: { current: true }, playerReadyRef: { current: true },
     lastSelectedTargetRef: { current: 90 }, youtubeRetryRef: { current: 1 },
     window: { clearInterval: id => cleared.push(id) },
     storeMetadata: changes => { if (storageFails) throw Error('storage unavailable'); Object.assign(metadata, changes); },
@@ -113,7 +113,7 @@ test('delayed YouTube seek samples cannot replace the selected measure during it
   let youtubeTime = 0;
   const env = {
     playerRef: { current: { getCurrentTime: () => youtubeTime, getDuration: () => 240, getPlayerState: () => 2 } },
-    playerReadyRef: { current: true }, countdownTimerRef: { current: 42 }, desiredPlayingRef: { current: false },
+    playerReadyRef: { current: true }, measureLoopRef: { current: null }, clearMeasureLoop() { env.measureLoopRef.current = null; }, restartMeasureLoop: () => false, keyboardSeekRef: { current: null }, countdownTimerRef: { current: 42 }, desiredPlayingRef: { current: false },
     lastProgressRef: { current: { time: 0, changedAt: 0 } }, pollFailuresRef: { current: 0 },
     setTime: value => { displayedTime = value; }, setPlaying: () => {}, setDuration: () => {},
     setError: message => assert.fail(message), performance: { now: () => 1000 },
@@ -132,17 +132,19 @@ test('delayed YouTube seek samples cannot replace the selected measure during it
   assert.equal(displayedTime, 121, 'normal playback tracking resumes after the countdown');
 });
 
-function seeking({ countInSeconds = 4, ready = true, url = 'abcdefghijk', advancing = false, unstarted = false, time = 0, offset = 0, playbackOrder = Array.from({ length: 150 }, (_, i) => i) } = {}) {
+function seeking({ playbackRate = 1, countInSeconds = 4, ready = true, url = 'abcdefghijk', advancing = false, unstarted = false, time = 0, offset = 0, playbackOrder = Array.from({ length: 150 }, (_, i) => i) } = {}) {
   const harness = session();
   const { env, state } = harness;
+  let rate = playbackRate;
   let now = 0, position = 0, playerState = unstarted ? -1 : 2, muted = false, nextTimer = 0;
   const timers = new Map(), audible = [], commands = [];
   const speech = [];
   const player = {
+    getPlaybackRate: () => rate, setPlaybackRate: value => { rate = value; },
     getCurrentTime: () => position, getDuration: () => 240, getPlayerState: () => playerState,
     mute: () => { muted = true; commands.push('mute'); },
     unMute: () => { muted = false; audible.push(position); },
-    loadVideoById: options => { commands.push(['load', options]); unstarted = false; playerState = 1; if (advancing) position = options.startSeconds; },
+    loadVideoById: options => { rate = 1; commands.push(['load', options]); unstarted = false; playerState = 1; if (advancing) position = options.startSeconds; },
     seekTo: target => { commands.push(['seek', target]); if (advancing) position = target; },
     playVideo: () => { if (!unstarted) playerState = 1; commands.push('play'); if (!muted) audible.push(position); },
     pauseVideo: () => { playerState = 2; commands.push('pause'); },
@@ -151,7 +153,7 @@ function seeking({ countInSeconds = 4, ready = true, url = 'abcdefghijk', advanc
     startCountIn: seconds => { speech.push(seconds); const start = now; return () => now - start; }, stopCountIn: () => speech.push('stop'),
     playerRef: { current: player }, playerReadyRef: { current: ready }, countdownTimerRef: { current: null },
     videoId: 'abcdefghijk', url, getVideoId: value => value,
-    bpm: 120, beatsPerMeasure: 4, time, offset, playbackOrder, countInSeconds,
+    bpm: 120, beatsPerMeasure: 4, time, offset, playbackOrder, countInSeconds, playbackRate,
     lastProgressRef: { current: { time: 0, changedAt: 0 } }, performance: { now: () => now },
     window: { setInterval: fn => { timers.set(++nextTimer, fn); return nextTimer; }, clearInterval: id => timers.delete(id), setTimeout: () => {} },
   });
@@ -162,7 +164,7 @@ function seeking({ countInSeconds = 4, ready = true, url = 'abcdefghijk', advanc
   const edit = new Function(...Object.keys(env), `${editJs}\nreturn edit;`)(...Object.values(env));
   return { ...harness, select, edit, commands, audible, timers, speech, position: value => { position = value; }, playerState: value => { playerState = value; },
     tick: at => {
-      if (advancing && playerState === 1) position += (at - now) / 1000;
+      if (advancing && playerState === 1) position += (at - now) / 1000 * rate;
       now = at;
       for (const fn of [...timers.values()]) fn();
     } };
@@ -433,4 +435,36 @@ test('silent lead-in verifies playback before the selected measure instead of co
   for (let at = 50; at <= 4500; at += 50) h.tick(at);
   assert.ok(h.audible.length && h.audible.every(time => time >= 60 && time < 60.1));
   assert.equal(h.timers.size, 0);
+});
+
+ test('selected speed survives measure loading and countdown timing stays in real seconds', () => {
+  for (const playbackRate of [.25, .5, .65, .7, .75, .95, 1, 1.5, 2, 4]) {
+    for (const countInSeconds of [0, 1, 4]) {
+      const h = seeking({ playbackRate, countInSeconds, advancing: true });
+      h.select(30);
+      for (let at = 25; at <= 5000; at += 25) {
+        h.tick(at);
+        if (at < countInSeconds * 1000) assert.deepEqual(h.audible, []);
+        if (h.audible.length) {
+          assert.ok(at < countInSeconds * 1000 + 400, `${playbackRate}× with ${countInSeconds}s should not add a slow-speed lead-in delay`);
+          break;
+        }
+      }
+      assert.equal(h.env.playerRef.current.getPlaybackRate(), playbackRate);
+      assert.equal(h.audible.length, 1, `${playbackRate}× / ${countInSeconds}s must release audio`);
+      assert.ok(h.audible[0] >= 60 && h.audible[0] <= 60 + Math.max(.15, playbackRate * .1));
+    }
+  }
+});
+
+
+test('measure clicks stay in the selected loop occurrence or release it when clicking outside', () => {
+  const h = seeking({ time: 20, playbackOrder: [0,1,2,0,1,2,3] });
+  h.env.measureLoopRef.current = { startStep: 1, endStep: 2, start: 2, end: 6 };
+  h.select(1); assert.equal(h.state.Time,2); assert.ok(h.env.measureLoopRef.current);
+  h.select(3); assert.equal(h.state.Time,12); assert.equal(h.env.measureLoopRef.current,null);
+});
+test('switching songs or disconnecting releases the measure loop', () => {
+  const h = session(); h.env.measureLoopRef.current = { start: 10, end: 20 };
+  h.disconnect(false); assert.equal(h.env.measureLoopRef.current,null);
 });
